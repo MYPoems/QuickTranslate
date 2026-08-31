@@ -1,0 +1,36 @@
+.settings-window { overflow: auto; background: #f4f4f5; }
+.settings-shell { width: min(100%, 620px); margin: 0 auto; padding: 30px 34px 36px; }
+.settings-shell header { margin-bottom: 25px; }
+.eyebrow { margin: 0 0 6px; color: #71717a; font-size: 11px; font-weight: 700; letter-spacing: .13em; }
+h1 { margin: 0; font-size: 26px; letter-spacing: -.025em; }
+.subtitle { margin: 8px 0 0; color: #71717a; font-size: 13px; line-height: 1.55; }
+form { display: grid; gap: 16px; }
+label { display: grid; gap: 7px; color: #3f3f46; font-size: 13px; font-weight: 600; }
+input { width: 100%; border: 1px solid #d4d4d8; border-radius: 8px; outline: none; padding: 10px 11px; background: #fff; color: #18181b; font-size: 14px; font-weight: 400; }
+input:focus { border-color: #71717a; box-shadow: 0 0 0 3px rgba(113,113,122,.12); }
+input[readonly] { background: #e4e4e7; color: #52525b; }
+.checkbox-row { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+.checkbox-row input { width: 15px; height: 15px; margin: 0; }
+.preference-card { padding: 12px 13px; border: 1px solid #d4d4d8; border-radius: 9px; background: #fff; }
+.preference-card p { margin: 6px 0 0 23px; color: #71717a; font-size: 12px; line-height: 1.45; }
+.key-status { margin: -6px 0 0; color: #71717a; font-size: 12px; }
+.status { min-height: 18px; margin: -4px 0 0; font-size: 13px; }
+.status[data-kind="success"] { color: #15803d; }
+.status[data-kind="error"] { color: #b91c1c; }
+.form-actions { display: flex; justify-content: flex-end; gap: 9px; }
+.form-actions button { border-radius: 8px; padding: 9px 15px; font-size: 13px; font-weight: 600; }
+.secondary { border: 1px solid #d4d4d8; background: #fff; color: #27272a; }
+.primary { border: 1px solid #18181b; background: #18181b; color: #fafafa; }
+@media (prefers-color-scheme: dark) {
+  .settings-window { background: #18181b; }
+  .subtitle, .eyebrow, .key-status { color: #a1a1aa; }
+  label { color: #d4d4d8; }
+  input { border-color: #52525b; background: #27272a; color: #fafafa; }
+  input[readonly] { background: #3f3f46; color: #d4d4d8; }
+  .preference-card { border-color: #52525b; background: #27272a; }
+  .preference-card p { color: #a1a1aa; }
+  .secondary { border-color: #52525b; background: #27272a; color: #fafafa; }
+  .primary { border-color: #fafafa; background: #fafafa; color: #18181b; }
+  .status[data-kind="success"] { color: #86efac; }
+  .status[data-kind="error"] { color: #fca5a5; }
+}

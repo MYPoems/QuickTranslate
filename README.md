@@ -30,6 +30,30 @@ QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词翻�
 
 安装 Tauri 的 Windows 前置依赖可参考 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)。
 
+## 安装前置环境
+
+使用管理员身份打开 PowerShell，依次执行：
+
+```powershell
+winget install --id Git.Git -e --source winget --accept-package-agreements --accept-source-agreements
+winget install --id OpenJS.NodeJS.LTS -e --source winget --accept-package-agreements --accept-source-agreements
+winget install --id Rustlang.Rustup -e --source winget --accept-package-agreements --accept-source-agreements
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --source winget --override "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended" --accept-package-agreements --accept-source-agreements
+```
+
+安装完成后，关闭并重新打开 PowerShell。如果安装程序提示需要重启，请先重启 Windows。然后配置 Rust 的 MSVC 工具链并检查环境：
+
+```powershell
+rustup default stable-msvc
+git --version
+node --version
+npm --version
+rustc --version
+cargo --version
+```
+
+以上命令应全部输出版本号。如果某个命令仍提示“无法识别”，请再次重开 PowerShell，确认对应程序已加入 `PATH`。
+
 ## 从源码安装与运行
 
 确认已安装上述开发环境后，在 PowerShell 中执行：

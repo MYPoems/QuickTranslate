@@ -30,13 +30,18 @@ QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词翻�
 
 安装 Tauri 的 Windows 前置依赖可参考 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)。
 
-## 安装与运行
+## 从源码安装与运行
+
+确认已安装上述开发环境后，在 PowerShell 中执行：
 
 ```powershell
-cd "D:\Workspace\Codex Workspace\QuickTranslate"
+git clone https://github.com/MYPoems/QuickTranslate.git
+cd QuickTranslate
 npm install
 npm run tauri dev
 ```
+
+如果已经克隆过项目，可在项目目录中执行 `git pull` 获取最新代码，然后运行 `npm install` 和 `npm run tauri dev`。
 
 首次启动后，在系统托盘右键 QuickTranslate → “设置”：
 

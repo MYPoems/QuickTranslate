@@ -4,6 +4,20 @@ QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词翻�
 
 > 截图占位：`docs/screenshots/popup.png`、`docs/screenshots/settings.png`
 
+## 安装正式版（普通用户）
+
+支持 Windows x64。普通用户不需要安装 Git、Node.js、Rust 或 Visual Studio Build Tools。使用 PowerShell 执行以下命令即可下载、校验并运行 `v0.2.0` 安装程序：
+
+```powershell
+$installer = Join-Path $env:TEMP "QuickTranslate_0.2.0_x64-setup.exe"
+Invoke-WebRequest "https://github.com/MYPoems/QuickTranslate/releases/download/v0.2.0/QuickTranslate_0.2.0_x64-setup.exe" -OutFile $installer
+if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "A5CFFEF69736BFABECC30DA185C09331FDB023A0202EA2160E2721D575BCECFD") { Remove-Item $installer -Force; throw "安装包校验失败，请勿运行" }
+Start-Process $installer -Wait
+Remove-Item $installer -Force
+```
+
+也可以前往 [Releases](https://github.com/MYPoems/QuickTranslate/releases/latest) 手动下载安装包。安装后从 Windows 开始菜单启动 `QuickTranslate`；应用会常驻系统托盘。当前安装包尚未进行商业代码签名，因此 Windows SmartScreen 可能显示“未知发布者”，请只从本仓库的 Releases 页面下载并核对上述 SHA-256。
+
 ## 功能
 
 - 系统托盘：翻译、设置、退出
@@ -30,7 +44,7 @@ QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词翻�
 
 安装 Tauri 的 Windows 前置依赖可参考 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)。
 
-## 安装前置环境
+## 开发者：安装前置环境
 
 使用管理员身份打开 PowerShell，依次执行：
 

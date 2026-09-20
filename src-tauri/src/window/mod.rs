@@ -4,7 +4,17 @@ use crate::platform;
 
 pub fn show_popup(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("popup") {
-        if let Some(position) = platform::popup_placement(420, 260) {
+        let (width, height) = window
+            .outer_size()
+            .map(|size| {
+                (
+                    i32::try_from(size.width).unwrap_or(i32::MAX),
+                    i32::try_from(size.height).unwrap_or(i32::MAX),
+                )
+            })
+            .unwrap_or((420, 260));
+
+        if let Some(position) = platform::popup_placement(width, height) {
             let _ = window.set_position(PhysicalPosition::new(position.x, position.y));
         }
         let _ = window.show();

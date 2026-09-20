@@ -4,7 +4,10 @@ use windows::Win32::{
     UI::WindowsAndMessaging::GetCursorPos,
 };
 
-use crate::{errors::AppError, platform::PopupPlacement};
+use crate::{
+    errors::AppError,
+    platform::{place_popup, PopupPlacement, WorkArea},
+};
 
 pub fn popup_placement(width: i32, height: i32) -> Result<PopupPlacement, AppError> {
     let mut cursor = POINT::default();
@@ -18,12 +21,16 @@ pub fn popup_placement(width: i32, height: i32) -> Result<PopupPlacement, AppErr
         return Err(AppError::Internal("GetMonitorInfoW failed".into()));
     }
 
-    let x = (cursor.x + 12).clamp(info.rcWork.left, info.rcWork.right - width);
-    let preferred_y = cursor.y + 18;
-    let y = if preferred_y + height <= info.rcWork.bottom {
-        preferred_y
-    } else {
-        (cursor.y - height - 12).max(info.rcWork.top)
-    };
-    Ok(PopupPlacement { x, y })
+    Ok(place_popup(
+        cursor.x,
+        cursor.y,
+        width,
+        height,
+        WorkArea {
+            left: info.rcWork.left,
+            top: info.rcWork.top,
+            right: info.rcWork.right,
+            bottom: info.rcWork.bottom,
+        },
+    ))
 }

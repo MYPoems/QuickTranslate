@@ -1,13 +1,10 @@
+mod placement;
 #[cfg(windows)]
 mod windows;
 
 use crate::errors::AppError;
 
-#[derive(Debug, Clone, Copy)]
-pub struct PopupPlacement {
-    pub x: i32,
-    pub y: i32,
-}
+pub use placement::{place_popup, PopupPlacement, WorkArea};
 
 pub async fn get_selected_text() -> Result<String, AppError> {
     #[cfg(windows)]

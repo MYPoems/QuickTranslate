@@ -5,6 +5,15 @@ pub mod errors {
     ));
 }
 
+pub mod platform {
+    pub mod placement {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src-tauri/src/platform/placement.rs"
+        ));
+    }
+}
+
 pub mod translation {
     pub mod types {
         include!(concat!(

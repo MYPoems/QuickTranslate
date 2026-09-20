@@ -4,7 +4,7 @@ use crate::{
     config::AppSettings,
     errors::AppError,
     providers::{OpenAiCompatibleProvider, ProviderConfig, Translator},
-    storage::TranslationCache,
+    storage::{HistoryEntry, TranslationCache},
 };
 
 use super::{
@@ -29,6 +29,25 @@ impl TranslationService {
         settings: AppSettings,
         api_key: String,
     ) -> Result<TranslationResult, AppError> {
+        self.translate_inner(text, settings, api_key, true).await
+    }
+
+    pub async fn translate_fresh(
+        &self,
+        text: String,
+        settings: AppSettings,
+        api_key: String,
+    ) -> Result<TranslationResult, AppError> {
+        self.translate_inner(text, settings, api_key, false).await
+    }
+
+    async fn translate_inner(
+        &self,
+        text: String,
+        settings: AppSettings,
+        api_key: String,
+        use_cache: bool,
+    ) -> Result<TranslationResult, AppError> {
         let text = normalize_text(&text)?;
         let source_language = detect_language(&text);
         let target_language = source_language.target();
@@ -40,12 +59,14 @@ impl TranslationService {
             &settings.model,
         );
 
-        let cache = Arc::clone(&self.cache);
-        let lookup_key = key.clone();
-        if let Ok(Ok(Some(result))) =
-            tokio::task::spawn_blocking(move || cache.get(&lookup_key)).await
-        {
-            return Ok(result);
+        if use_cache {
+            let cache = Arc::clone(&self.cache);
+            let lookup_key = key.clone();
+            if let Ok(Ok(Some(result))) =
+                tokio::task::spawn_blocking(move || cache.get(&lookup_key)).await
+            {
+                return Ok(result);
+            }
         }
 
         let provider = OpenAiCompatibleProvider::new(
@@ -106,6 +127,32 @@ impl TranslationService {
     pub async fn cache_size(&self) -> Result<i64, AppError> {
         let cache = Arc::clone(&self.cache);
         tokio::task::spawn_blocking(move || cache.len())
+            .await
+            .map_err(|error| AppError::Internal(error.to_string()))?
+    }
+
+    pub async fn history(
+        &self,
+        query: String,
+        favorite_only: bool,
+        limit: i64,
+    ) -> Result<Vec<HistoryEntry>, AppError> {
+        let cache = Arc::clone(&self.cache);
+        tokio::task::spawn_blocking(move || cache.history(&query, favorite_only, limit))
+            .await
+            .map_err(|error| AppError::Internal(error.to_string()))?
+    }
+
+    pub async fn set_favorite(&self, id: i64, favorite: bool) -> Result<(), AppError> {
+        let cache = Arc::clone(&self.cache);
+        tokio::task::spawn_blocking(move || cache.set_favorite(id, favorite))
+            .await
+            .map_err(|error| AppError::Internal(error.to_string()))?
+    }
+
+    pub async fn delete_history_entry(&self, id: i64) -> Result<(), AppError> {
+        let cache = Arc::clone(&self.cache);
+        tokio::task::spawn_blocking(move || cache.delete_history_entry(id))
             .await
             .map_err(|error| AppError::Internal(error.to_string()))?
     }

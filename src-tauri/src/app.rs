@@ -1,7 +1,7 @@
 use std::{
     path::PathBuf,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, RwLock,
     },
     time::Duration,
@@ -27,6 +27,7 @@ pub struct AppState {
     pub translation: Arc<TranslationService>,
     pub cache_path: PathBuf,
     latest_request: AtomicU64,
+    popup_pinned: AtomicBool,
     active_request: Mutex<CancellationToken>,
     last_error: RwLock<Option<DiagnosticError>>,
 }
@@ -64,6 +65,7 @@ impl AppState {
             translation: Arc::new(TranslationService::new(client, cache)),
             cache_path,
             latest_request: AtomicU64::new(0),
+            popup_pinned: AtomicBool::new(false),
             active_request: Mutex::new(CancellationToken::new()),
             last_error: RwLock::new(None),
         })
@@ -94,6 +96,14 @@ impl AppState {
 
     pub fn last_error(&self) -> Option<DiagnosticError> {
         self.last_error.read().ok().and_then(|error| error.clone())
+    }
+
+    pub fn popup_pinned(&self) -> bool {
+        self.popup_pinned.load(Ordering::Relaxed)
+    }
+
+    pub fn set_popup_pinned(&self, pinned: bool) {
+        self.popup_pinned.store(pinned, Ordering::Relaxed);
     }
 }
 

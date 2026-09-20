@@ -1,6 +1,7 @@
 use std::{path::Path, sync::Mutex};
 
 use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::{
@@ -12,6 +13,20 @@ const MAX_CACHE_ENTRIES: i64 = 1_000;
 
 pub struct TranslationCache {
     connection: Mutex<Connection>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntry {
+    pub id: i64,
+    pub source_text: String,
+    pub translation: String,
+    pub source_language: String,
+    pub target_language: String,
+    pub provider: String,
+    pub model: String,
+    pub created_at: i64,
+    pub favorite: bool,
 }
 
 impl TranslationCache {
@@ -45,8 +60,14 @@ impl TranslationCache {
                model TEXT NOT NULL,
                created_at INTEGER NOT NULL DEFAULT (unixepoch()),
                last_used_at INTEGER NOT NULL DEFAULT (unixepoch()),
-               hit_count INTEGER NOT NULL DEFAULT 0
+               hit_count INTEGER NOT NULL DEFAULT 0,
+               favorite INTEGER NOT NULL DEFAULT 0
              );",
+        )?;
+        ensure_column(&connection, "favorite", "INTEGER NOT NULL DEFAULT 0")?;
+        connection.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_translation_history
+               ON translation_cache(favorite DESC, last_used_at DESC, id DESC);",
         )?;
         Ok(Self {
             connection: Mutex::new(connection),
@@ -117,6 +138,71 @@ impl TranslationCache {
         Ok(connection.execute("DELETE FROM translation_cache", [])?)
     }
 
+    pub fn history(
+        &self,
+        query: &str,
+        favorite_only: bool,
+        limit: i64,
+    ) -> Result<Vec<HistoryEntry>, AppError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| AppError::Database("cache lock poisoned".into()))?;
+        let mut statement = connection.prepare(
+            "SELECT id, source_text, translation, source_language, target_language,
+                    provider, model, created_at, favorite
+             FROM translation_cache
+             WHERE (?1 = '' OR source_text LIKE '%' || ?1 || '%' OR translation LIKE '%' || ?1 || '%')
+               AND (?2 = 0 OR favorite = 1)
+             ORDER BY favorite DESC, last_used_at DESC, id DESC
+             LIMIT ?3",
+        )?;
+        let rows = statement.query_map(
+            params![query.trim(), i64::from(favorite_only), limit.clamp(1, 200)],
+            |row| {
+                Ok(HistoryEntry {
+                    id: row.get(0)?,
+                    source_text: row.get(1)?,
+                    translation: row.get(2)?,
+                    source_language: row.get(3)?,
+                    target_language: row.get(4)?,
+                    provider: row.get(5)?,
+                    model: row.get(6)?,
+                    created_at: row.get(7)?,
+                    favorite: row.get::<_, i64>(8)? != 0,
+                })
+            },
+        )?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(AppError::from)
+    }
+
+    pub fn set_favorite(&self, id: i64, favorite: bool) -> Result<(), AppError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| AppError::Database("cache lock poisoned".into()))?;
+        let changed = connection.execute(
+            "UPDATE translation_cache SET favorite = ?2 WHERE id = ?1",
+            params![id, i64::from(favorite)],
+        )?;
+        if changed == 0 {
+            return Err(AppError::Database("history entry was not found".into()));
+        }
+        Ok(())
+    }
+
+    pub fn delete_history_entry(&self, id: i64) -> Result<(), AppError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| AppError::Database("cache lock poisoned".into()))?;
+        let changed = connection.execute("DELETE FROM translation_cache WHERE id = ?1", [id])?;
+        if changed == 0 {
+            return Err(AppError::Database("history entry was not found".into()));
+        }
+        Ok(())
+    }
+
     pub fn len(&self) -> Result<i64, AppError> {
         let connection = self
             .connection
@@ -130,12 +216,27 @@ impl TranslationCache {
     }
 }
 
+fn ensure_column(connection: &Connection, name: &str, definition: &str) -> Result<(), AppError> {
+    let mut statement = connection.prepare("PRAGMA table_info(translation_cache)")?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for column in columns {
+        if column? == name {
+            return Ok(());
+        }
+    }
+    connection.execute(
+        &format!("ALTER TABLE translation_cache ADD COLUMN {name} {definition}"),
+        [],
+    )?;
+    Ok(())
+}
+
 fn prune_to_limit(connection: &Connection, limit: i64) -> Result<(), AppError> {
     connection.execute(
         "DELETE FROM translation_cache
          WHERE id IN (
            SELECT id FROM translation_cache
-           ORDER BY last_used_at DESC, id DESC
+           ORDER BY favorite DESC, last_used_at DESC, id DESC
            LIMIT -1 OFFSET ?1
          )",
         [limit.max(0)],
@@ -224,5 +325,44 @@ mod tests {
 
         assert_eq!(cache.len().unwrap(), 2);
         assert!(cache.get("first").unwrap().is_none());
+    }
+
+    #[test]
+    fn searches_favorites_and_deletes_history() {
+        let cache = TranslationCache::in_memory().unwrap();
+        cache.put("first", &result()).unwrap();
+        let entries = cache.history("hello", false, 50).unwrap();
+        assert_eq!(entries.len(), 1);
+        let id = entries[0].id;
+        cache.set_favorite(id, true).unwrap();
+        assert!(cache.history("", true, 50).unwrap()[0].favorite);
+        cache.delete_history_entry(id).unwrap();
+        assert!(cache.history("", false, 50).unwrap().is_empty());
+    }
+
+    #[test]
+    fn migrates_existing_cache_schema() {
+        let connection = Connection::open_in_memory().unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE translation_cache (
+                   id INTEGER PRIMARY KEY,
+                   cache_key TEXT NOT NULL UNIQUE,
+                   source_text TEXT NOT NULL,
+                   source_language TEXT NOT NULL,
+                   target_language TEXT NOT NULL,
+                   translation TEXT NOT NULL,
+                   result_json TEXT NOT NULL,
+                   provider TEXT NOT NULL,
+                   model TEXT NOT NULL,
+                   created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                   last_used_at INTEGER NOT NULL DEFAULT (unixepoch()),
+                   hit_count INTEGER NOT NULL DEFAULT 0
+                 );",
+            )
+            .unwrap();
+        let cache = TranslationCache::from_connection(connection).unwrap();
+        cache.put("migrated", &result()).unwrap();
+        assert!(!cache.history("", false, 10).unwrap()[0].favorite);
     }
 }

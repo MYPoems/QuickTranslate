@@ -56,12 +56,15 @@ pub fn run() {
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. }
-                if window.label() == "popup" || window.label() == "settings" =>
+                if matches!(window.label(), "popup" | "settings" | "history") =>
             {
                 api.prevent_close();
                 let _ = window.hide();
             }
-            tauri::WindowEvent::Focused(false) if window.label() == "popup" => {
+            tauri::WindowEvent::Focused(false)
+                if window.label() == "popup"
+                    && !window.app_handle().state::<AppState>().popup_pinned() =>
+            {
                 let _ = window.hide();
             }
             _ => {}
@@ -69,8 +72,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::translation::translate_selected_text,
             commands::translation::translate_text,
+            commands::translation::retranslate_text,
             commands::translation::copy_translation,
             commands::translation::clear_translation_cache,
+            commands::translation::list_translation_history,
+            commands::translation::set_history_favorite,
+            commands::translation::delete_history_entry,
+            commands::translation::get_popup_pinned,
+            commands::translation::set_popup_pinned,
             commands::translation::hide_translation_window,
             commands::settings::get_settings,
             commands::settings::save_settings,

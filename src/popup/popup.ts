@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { TranslationEvent, TranslationResult } from "../types";
+import type { AppError, TranslationEvent, TranslationResult } from "../types";
 import "./popup.css";
 
 const root = document.querySelector<HTMLElement>("#app")!;
 let currentRequestId = 0;
+let currentSource = "";
 let currentTranslation = "";
+let pinned = false;
 
 export function mountPopup(): void {
   root.innerHTML = `
@@ -20,17 +22,42 @@ export function mountPopup(): void {
       <footer class="actions">
         <span id="meta" class="meta">就绪</span>
         <div class="action-buttons">
-          <button id="copy" class="text-button" type="button" disabled>复制</button>
+          <button id="pin" class="icon-button pin-button" type="button" title="固定悬浮窗" aria-label="固定悬浮窗" aria-pressed="false">⌖</button>
+          <button id="retranslate" class="text-button" type="button" disabled title="Alt+R">重译</button>
+          <button id="copy-source" class="text-button" type="button" disabled title="Ctrl+Shift+C">原文</button>
+          <button id="copy" class="text-button" type="button" disabled title="Ctrl+C">译文</button>
           <button id="close" class="icon-button" type="button" aria-label="关闭">×</button>
         </div>
       </footer>
     </section>`;
 
-  root.querySelector<HTMLButtonElement>("#copy")!.addEventListener("click", () => void copyResult());
+  root.querySelector<HTMLButtonElement>("#copy")!.addEventListener("click", () => {
+    void copyText(currentTranslation, "#copy");
+  });
+  root.querySelector<HTMLButtonElement>("#copy-source")!.addEventListener("click", () => {
+    void copyText(currentSource, "#copy-source");
+  });
+  root.querySelector<HTMLButtonElement>("#retranslate")!.addEventListener("click", () => {
+    void retranslate();
+  });
+  root.querySelector<HTMLButtonElement>("#pin")!.addEventListener("click", () => {
+    void togglePin();
+  });
   root.querySelector<HTMLButtonElement>("#close")!.addEventListener("click", () => void hide());
   window.addEventListener("keydown", (event) => {
     if (event.key === "Escape") void hide();
+    if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "c" && currentSource) {
+      event.preventDefault();
+      void copyText(currentSource, "#copy-source");
+    } else if (event.ctrlKey && event.key.toLowerCase() === "c" && currentTranslation) {
+      event.preventDefault();
+      void copyText(currentTranslation, "#copy");
+    } else if (event.altKey && event.key.toLowerCase() === "r" && currentSource) {
+      event.preventDefault();
+      void retranslate();
+    }
   });
+  void invoke<boolean>("get_popup_pinned").then(updatePin);
   void listen<TranslationEvent>("translation-state", ({ payload }) => render(payload));
 }
 
@@ -40,15 +67,20 @@ function render(event: TranslationEvent): void {
   const source = root.querySelector<HTMLElement>("#source")!;
   const content = root.querySelector<HTMLElement>("#content")!;
   const copy = root.querySelector<HTMLButtonElement>("#copy")!;
+  const copySource = root.querySelector<HTMLButtonElement>("#copy-source")!;
+  const retranslateButton = root.querySelector<HTMLButtonElement>("#retranslate")!;
   const meta = root.querySelector<HTMLElement>("#meta")!;
   const badge = root.querySelector<HTMLElement>("#badge")!;
 
   if (event.status === "loading") {
+    currentSource = event.sourceText || "";
     currentTranslation = "";
-    source.textContent = event.sourceText || "选中的文字";
+    source.textContent = currentSource || "选中的文字";
     content.className = "content loading";
     content.innerHTML = `<div class="spinner" aria-hidden="true"></div><p>正在翻译…</p>`;
     copy.disabled = true;
+    copySource.disabled = !currentSource;
+    retranslateButton.disabled = true;
     meta.textContent = "正在请求翻译服务";
     badge.hidden = true;
     return;
@@ -56,11 +88,13 @@ function render(event: TranslationEvent): void {
 
   if (event.status === "error") {
     currentTranslation = "";
-    source.textContent = "QuickTranslate";
+    source.textContent = currentSource || "QuickTranslate";
     content.className = "content error";
     content.innerHTML = `<p class="error-message"></p>`;
     content.querySelector("p")!.textContent = event.error?.message || "翻译失败";
     copy.disabled = true;
+    copySource.disabled = !currentSource;
+    retranslateButton.disabled = !currentSource;
     meta.textContent = event.error?.code || "ERROR";
     badge.hidden = true;
     return;
@@ -77,6 +111,7 @@ function renderResult(
   meta: HTMLElement,
   badge: HTMLElement,
 ): void {
+  currentSource = result.sourceText;
   currentTranslation = result.translation;
   source.textContent = result.sourceText;
   content.className = "content success";
@@ -109,21 +144,63 @@ function renderResult(
     content.append(example);
   }
   copy.disabled = false;
+  root.querySelector<HTMLButtonElement>("#copy-source")!.disabled = false;
+  root.querySelector<HTMLButtonElement>("#retranslate")!.disabled = false;
   meta.textContent = `${result.provider} · ${result.model}`;
   badge.textContent = result.cached ? "缓存" : "已翻译";
   badge.hidden = false;
 }
 
-async function copyResult(): Promise<void> {
-  if (!currentTranslation) return;
-  const button = root.querySelector<HTMLButtonElement>("#copy")!;
+async function copyText(text: string, selector: string): Promise<void> {
+  if (!text) return;
+  const button = root.querySelector<HTMLButtonElement>(selector)!;
+  const original = button.textContent || "复制";
   try {
-    await invoke("copy_translation", { text: currentTranslation });
+    await invoke("copy_translation", { text });
     button.textContent = "已复制";
-    window.setTimeout(() => (button.textContent = "复制"), 1200);
+    window.setTimeout(() => (button.textContent = original), 1200);
   } catch {
-    button.textContent = "复制失败";
+    button.textContent = "失败";
+    window.setTimeout(() => (button.textContent = original), 1200);
   }
+}
+
+async function retranslate(): Promise<void> {
+  if (!currentSource) return;
+  const sourceText = currentSource;
+  const requestId = currentRequestId;
+  render({ requestId, status: "loading", sourceText });
+  try {
+    const result = await invoke<TranslationResult>("retranslate_text", { text: sourceText });
+    if (currentRequestId === requestId) render({ requestId, status: "success", result });
+  } catch (error) {
+    if (currentRequestId === requestId) {
+      render({ requestId, status: "error", error: normalizeError(error) });
+    }
+  }
+}
+
+async function togglePin(): Promise<void> {
+  try {
+    updatePin(await invoke<boolean>("set_popup_pinned", { pinned: !pinned }));
+  } catch {
+    // Keep the previous visual state when persistence fails.
+  }
+}
+
+function updatePin(value: boolean): void {
+  pinned = value;
+  const button = root.querySelector<HTMLButtonElement>("#pin")!;
+  button.setAttribute("aria-pressed", String(pinned));
+  button.title = pinned ? "取消固定" : "固定悬浮窗";
+  button.setAttribute("aria-label", button.title);
+}
+
+function normalizeError(error: unknown): AppError {
+  if (typeof error === "object" && error !== null && "message" in error) {
+    return error as AppError;
+  }
+  return { code: "ERROR", message: typeof error === "string" ? error : "翻译失败" };
 }
 
 async function hide(): Promise<void> {

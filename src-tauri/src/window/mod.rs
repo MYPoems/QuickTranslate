@@ -37,3 +37,19 @@ pub fn show_settings(app: &AppHandle) {
         .center()
         .build();
 }
+
+pub fn show_history(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("history") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+
+    let _ = WebviewWindowBuilder::new(app, "history", WebviewUrl::App("index.html".into()))
+        .title("QuickTranslate 翻译历史")
+        .inner_size(760.0, 680.0)
+        .min_inner_size(560.0, 460.0)
+        .resizable(true)
+        .center()
+        .build();
+}

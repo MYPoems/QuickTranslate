@@ -27,8 +27,10 @@ Remove-Item $installer -Force
 - OpenAI-compatible Provider（Base URL、Model 可配置）
 - API Key 保存到 Windows Credential Manager，不写入 JSON 或 SQLite
 - SQLite 翻译缓存；缓存失败不影响正常展示
+- 本地翻译历史支持搜索、收藏、复制与删除
 - 鼠标附近的无标题栏、置顶悬浮窗；自动避让当前显示器工作区边缘
 - 点击悬浮窗以外的位置时自动收起，不打断当前工作流
+- 悬浮窗可固定显示，并可复制原文、复制译文或绕过缓存重新翻译
 - 可在设置中启用或关闭 Windows 登录后自动启动
 - 单词查询可显示音标、词性、释义与例句
 - request ID 并发防护，旧请求不会覆盖新结果

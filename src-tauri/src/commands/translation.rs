@@ -4,6 +4,7 @@ use crate::{
     app::{trigger_selected_translation, AppState},
     errors::AppError,
     platform,
+    storage::HistoryEntry,
     translation::types::TranslationResult,
 };
 
@@ -25,6 +26,21 @@ pub async fn translate_text(text: String, app: AppHandle) -> Result<TranslationR
 }
 
 #[tauri::command]
+pub async fn retranslate_text(text: String, app: AppHandle) -> Result<TranslationResult, AppError> {
+    let state = app.state::<AppState>();
+    let settings = state.settings.get()?;
+    let api_key = state
+        .secrets
+        .get_api_key()?
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(AppError::ProviderNotConfigured)?;
+    state
+        .translation
+        .translate_fresh(text, settings, api_key)
+        .await
+}
+
+#[tauri::command]
 pub async fn copy_translation(text: String) -> Result<(), AppError> {
     platform::copy_text(text).await
 }
@@ -32,6 +48,45 @@ pub async fn copy_translation(text: String) -> Result<(), AppError> {
 #[tauri::command]
 pub async fn clear_translation_cache(app: AppHandle) -> Result<usize, AppError> {
     app.state::<AppState>().translation.clear_cache().await
+}
+
+#[tauri::command]
+pub async fn list_translation_history(
+    query: String,
+    favorite_only: bool,
+    app: AppHandle,
+) -> Result<Vec<HistoryEntry>, AppError> {
+    app.state::<AppState>()
+        .translation
+        .history(query, favorite_only, 200)
+        .await
+}
+
+#[tauri::command]
+pub async fn set_history_favorite(id: i64, favorite: bool, app: AppHandle) -> Result<(), AppError> {
+    app.state::<AppState>()
+        .translation
+        .set_favorite(id, favorite)
+        .await
+}
+
+#[tauri::command]
+pub async fn delete_history_entry(id: i64, app: AppHandle) -> Result<(), AppError> {
+    app.state::<AppState>()
+        .translation
+        .delete_history_entry(id)
+        .await
+}
+
+#[tauri::command]
+pub fn get_popup_pinned(app: AppHandle) -> bool {
+    app.state::<AppState>().popup_pinned()
+}
+
+#[tauri::command]
+pub fn set_popup_pinned(pinned: bool, app: AppHandle) -> bool {
+    app.state::<AppState>().set_popup_pinned(pinned);
+    pinned
 }
 
 #[tauri::command]

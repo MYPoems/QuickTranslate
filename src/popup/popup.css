@@ -23,6 +23,8 @@
 .text-button, .icon-button { border: 0; border-radius: 7px; background: transparent; color: #3f3f46; }
 .text-button { padding: 6px 9px; font-size: 13px; }
 .icon-button { width: 28px; height: 28px; font-size: 19px; line-height: 1; }
+.pin-button { font-size: 16px; }
+.pin-button[aria-pressed="true"] { background: #27272a; color: #fafafa; }
 .text-button:not(:disabled):hover, .icon-button:hover { background: #e4e4e7; }
 @media (prefers-color-scheme: dark) {
   .popup-shell { border-color: rgba(255,255,255,.1); background: rgba(24,24,27,.98); box-shadow: 0 16px 44px rgba(0,0,0,.48); }
@@ -34,6 +36,7 @@
   .actions { border-color: #3f3f46; }
   .text-button, .icon-button { color: #d4d4d8; }
   .text-button:not(:disabled):hover, .icon-button:hover { background: #3f3f46; }
+  .pin-button[aria-pressed="true"] { background: #e4e4e7; color: #18181b; }
   .spinner { border-color: #52525b; border-top-color: #e4e4e7; }
   .error-message { color: #fca5a5; }
 }

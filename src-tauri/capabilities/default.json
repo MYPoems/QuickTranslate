@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for QuickTranslate windows",
-  "windows": ["popup", "settings"],
+  "windows": ["popup", "settings", "history"],
   "permissions": [
     "core:default",
     "core:event:default",

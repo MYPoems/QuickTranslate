@@ -57,3 +57,15 @@ export interface DiagnosticsView {
   cachePath: string;
   lastError?: AppError;
 }
+
+export interface HistoryEntry {
+  id: number;
+  sourceText: string;
+  translation: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  provider: string;
+  model: string;
+  createdAt: number;
+  favorite: boolean;
+}

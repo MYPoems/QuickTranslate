@@ -1,3 +1,3 @@
 mod cache;
 
-pub use cache::{cache_key, TranslationCache};
+pub use cache::{cache_key, HistoryEntry, TranslationCache};

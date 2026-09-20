@@ -8,6 +8,8 @@ use crate::{
     translation::types::{Language, TranslationResult},
 };
 
+const MAX_CACHE_ENTRIES: i64 = 1_000;
+
 pub struct TranslationCache {
     connection: Mutex<Connection>,
 }
@@ -103,8 +105,43 @@ impl TranslationCache {
                 result.model,
             ],
         )?;
+        prune_to_limit(&connection, MAX_CACHE_ENTRIES)?;
         Ok(())
     }
+
+    pub fn clear(&self) -> Result<usize, AppError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| AppError::Database("cache lock poisoned".into()))?;
+        Ok(connection.execute("DELETE FROM translation_cache", [])?)
+    }
+
+    #[cfg(test)]
+    fn len(&self) -> Result<i64, AppError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| AppError::Database("cache lock poisoned".into()))?;
+        Ok(
+            connection.query_row("SELECT COUNT(*) FROM translation_cache", [], |row| {
+                row.get(0)
+            })?,
+        )
+    }
+}
+
+fn prune_to_limit(connection: &Connection, limit: i64) -> Result<(), AppError> {
+    connection.execute(
+        "DELETE FROM translation_cache
+         WHERE id IN (
+           SELECT id FROM translation_cache
+           ORDER BY last_used_at DESC, id DESC
+           LIMIT -1 OFFSET ?1
+         )",
+        [limit.max(0)],
+    )?;
+    Ok(())
 }
 
 pub fn cache_key(
@@ -164,5 +201,29 @@ mod tests {
         let loaded = cache.get("key").unwrap().unwrap();
         assert_eq!(loaded.translation, "你好");
         assert!(loaded.cached);
+    }
+
+    #[test]
+    fn clears_cached_results() {
+        let cache = TranslationCache::in_memory().unwrap();
+        cache.put("key", &result()).unwrap();
+        assert_eq!(cache.clear().unwrap(), 1);
+        assert_eq!(cache.len().unwrap(), 0);
+    }
+
+    #[test]
+    fn prunes_least_recent_entries_to_limit() {
+        let cache = TranslationCache::in_memory().unwrap();
+        cache.put("first", &result()).unwrap();
+        cache.put("second", &result()).unwrap();
+        cache.put("third", &result()).unwrap();
+
+        {
+            let connection = cache.connection.lock().unwrap();
+            prune_to_limit(&connection, 2).unwrap();
+        }
+
+        assert_eq!(cache.len().unwrap(), 2);
+        assert!(cache.get("first").unwrap().is_none());
     }
 }

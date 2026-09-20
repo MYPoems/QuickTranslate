@@ -25,4 +25,5 @@ dist-ssr
 
 # Rust / Tauri
 src-tauri/target/
+core-tests/target/
 artifacts/

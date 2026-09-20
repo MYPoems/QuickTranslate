@@ -44,7 +44,7 @@ impl AppState {
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))
             .pool_idle_timeout(Duration::from_secs(90))
-            .user_agent("QuickTranslate/0.1")
+            .user_agent(concat!("QuickTranslate/", env!("CARGO_PKG_VERSION")))
             .build()
             .map_err(|error| AppError::Internal(error.to_string()))?;
         Ok(Self {
@@ -87,6 +87,10 @@ pub fn trigger_selected_translation(app: AppHandle) -> u64 {
                 return;
             }
         };
+
+        if !app.state::<AppState>().is_latest(request_id) {
+            return;
+        }
 
         window::show_popup(&app);
         let _ = app.emit_to(

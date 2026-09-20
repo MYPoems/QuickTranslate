@@ -22,6 +22,13 @@ export function mountSettings(): void {
           <label class="checkbox-row"><input name="autoStartEnabled" type="checkbox" />开机自动启动</label>
           <p>登录 Windows 后在后台启动 QuickTranslate，不主动显示窗口。</p>
         </div>
+        <div class="maintenance-card">
+          <div>
+            <strong>本地翻译缓存</strong>
+            <p>最多保留 1000 条常用译文，可随时清理。</p>
+          </div>
+          <button id="clear-cache" type="button" class="secondary">清理缓存</button>
+        </div>
         <label class="checkbox-row"><input name="clearApiKey" type="checkbox" />删除已保存的 API Key</label>
         <p id="key-status" class="key-status"></p>
         <p id="status" class="status" role="status"></p>
@@ -38,6 +45,9 @@ export function mountSettings(): void {
     void save(form);
   });
   root.querySelector<HTMLButtonElement>("#test")!.addEventListener("click", () => void test(form));
+  root
+    .querySelector<HTMLButtonElement>("#clear-cache")!
+    .addEventListener("click", () => void clearCache());
   void load(form);
 }
 
@@ -80,6 +90,19 @@ async function test(form: HTMLFormElement): Promise<void> {
   try {
     await invoke<string>("test_provider", { update: formValue(form) });
     setStatus("连接成功", "success");
+  } catch (error) {
+    setStatus(errorMessage(error), "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function clearCache(): Promise<void> {
+  setBusy(true);
+  setStatus("正在清理本地缓存…", "neutral");
+  try {
+    const removed = await invoke<number>("clear_translation_cache");
+    setStatus(`已清理 ${removed} 条缓存`, "success");
   } catch (error) {
     setStatus(errorMessage(error), "error");
   } finally {

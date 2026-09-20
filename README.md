@@ -27,11 +27,13 @@ Remove-Item $installer -Force
 - OpenAI-compatible Provider（Base URL、Model 可配置）
 - API Key 保存到 Windows Credential Manager，不写入 JSON 或 SQLite
 - SQLite 翻译缓存；缓存失败不影响正常展示
-- 鼠标附近的无标题栏、置顶悬浮窗
+- 鼠标附近的无标题栏、置顶悬浮窗；自动避让当前显示器工作区边缘
 - 点击悬浮窗以外的位置时自动收起，不打断当前工作流
 - 可在设置中启用或关闭 Windows 登录后自动启动
 - 单词查询可显示音标、词性、释义与例句
 - request ID 并发防护，旧请求不会覆盖新结果
+- API 限流、超时及服务端临时故障自动短暂重试
+- 翻译缓存最多保留 1000 条，并可在设置中一键清理
 - 浅色/深色自动适配，无前端 UI 框架和轮询
 
 ## 开发环境
@@ -81,6 +83,20 @@ npm run tauri dev
 
 如果已经克隆过项目，可在项目目录中执行 `git pull` 获取最新代码，然后运行 `npm install` 和 `npm run tauri dev`。
 
+## 回滚到当前稳定版
+
+仓库使用 Git 管理版本，当前稳定基线是 `v0.2.0`。请先保存或提交自己的改动，然后在仓库目录运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\rollback-to-stable.ps1
+```
+
+脚本检测到未提交改动时会拒绝执行，避免误删文件；回滚后处于稳定标签的只读检出状态。需要回到开发主分支时运行：
+
+```powershell
+git switch main
+```
+
 首次启动后，在系统托盘右键 QuickTranslate → “设置”：
 
 1. 填写 OpenAI-compatible `Base URL`，例如 `https://api.openai.com/v1`。
@@ -92,6 +108,8 @@ npm run tauri dev
 然后在 Notepad、Edge/Chrome 或 VS Code 中选中文字，按 `Alt + Q`。
 
 ## 检查与构建
+
+每次推送到 `main` 或提交 Pull Request 时，GitHub Actions 会在 Windows 环境自动执行前端构建、Rust 格式检查、Clippy 和测试。本地可运行同一组核心命令：
 
 ```powershell
 npm run build
@@ -153,5 +171,5 @@ core-tests/         受限 GNU 环境下复用核心源码测试的 harness
 ## Roadmap
 
 1. macOS Accessibility / Linux selection clipboard 平台实现。
-2. 可选的本地 Ollama/LM Studio 预设与缓存维护工具。
-3. 缓存查看、清理与可选的生词收藏。
+2. 可选的本地 Ollama/LM Studio 预设。
+3. 缓存历史查看与可选的生词收藏。

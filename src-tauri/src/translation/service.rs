@@ -95,4 +95,11 @@ impl TranslationService {
             .await?;
         Ok(())
     }
+
+    pub async fn clear_cache(&self) -> Result<usize, AppError> {
+        let cache = Arc::clone(&self.cache);
+        tokio::task::spawn_blocking(move || cache.clear())
+            .await
+            .map_err(|error| AppError::Internal(error.to_string()))?
+    }
 }

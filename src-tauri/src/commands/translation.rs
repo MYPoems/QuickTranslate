@@ -30,6 +30,11 @@ pub async fn copy_translation(text: String) -> Result<(), AppError> {
 }
 
 #[tauri::command]
+pub async fn clear_translation_cache(app: AppHandle) -> Result<usize, AppError> {
+    app.state::<AppState>().translation.clear_cache().await
+}
+
+#[tauri::command]
 pub fn hide_translation_window(app: AppHandle) -> Result<(), AppError> {
     let window = app
         .get_webview_window("popup")

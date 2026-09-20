@@ -70,6 +70,7 @@ pub fn run() {
             commands::translation::translate_selected_text,
             commands::translation::translate_text,
             commands::translation::copy_translation,
+            commands::translation::clear_translation_cache,
             commands::translation::hide_translation_window,
             commands::settings::get_settings,
             commands::settings::save_settings,

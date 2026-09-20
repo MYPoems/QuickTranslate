@@ -1,5 +1,7 @@
 use async_trait::async_trait;
-use reqwest::StatusCode;
+use std::time::Duration;
+
+use reqwest::{header::RETRY_AFTER, StatusCode};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -96,14 +98,39 @@ impl Translator for OpenAiCompatibleProvider {
             temperature: 0.1,
         };
 
-        let response = self
-            .client
-            .post(self.endpoint())
-            .bearer_auth(&self.config.api_key)
-            .json(&body)
-            .send()
-            .await
-            .map_err(map_reqwest_error)?;
+        let mut attempt = 0;
+        let response = loop {
+            let outcome = self
+                .client
+                .post(self.endpoint())
+                .bearer_auth(&self.config.api_key)
+                .json(&body)
+                .send()
+                .await;
+
+            match outcome {
+                Ok(response) if is_retryable_status(response.status()) && attempt < MAX_RETRIES => {
+                    let delay = retry_delay(
+                        attempt,
+                        response
+                            .headers()
+                            .get(RETRY_AFTER)
+                            .and_then(|value| value.to_str().ok()),
+                    );
+                    attempt += 1;
+                    tokio::time::sleep(delay).await;
+                }
+                Err(error)
+                    if (error.is_timeout() || error.is_connect()) && attempt < MAX_RETRIES =>
+                {
+                    let delay = retry_delay(attempt, None);
+                    attempt += 1;
+                    tokio::time::sleep(delay).await;
+                }
+                Ok(response) => break response,
+                Err(error) => return Err(map_reqwest_error(error)),
+            }
+        };
 
         let status = response.status();
         if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
@@ -125,6 +152,19 @@ impl Translator for OpenAiCompatibleProvider {
             .map_err(|error| AppError::Provider(format!("API 响应格式无效: {error}")))?;
         parse_response(response, &request, &self.config.model)
     }
+}
+
+const MAX_RETRIES: u32 = 2;
+
+fn is_retryable_status(status: StatusCode) -> bool {
+    status == StatusCode::TOO_MANY_REQUESTS || status.is_server_error()
+}
+
+fn retry_delay(attempt: u32, retry_after: Option<&str>) -> Duration {
+    if let Some(seconds) = retry_after.and_then(|value| value.parse::<u64>().ok()) {
+        return Duration::from_secs(seconds.min(2));
+    }
+    Duration::from_millis(250 * 2_u64.pow(attempt.min(3)))
 }
 
 fn map_reqwest_error(error: reqwest::Error) -> AppError {
@@ -227,5 +267,19 @@ mod tests {
     fn rejects_empty_choices() {
         let response = ChatResponse { choices: vec![] };
         assert!(parse_response(response, &request("hello"), "test").is_err());
+    }
+
+    #[test]
+    fn retries_only_transient_http_failures() {
+        assert!(is_retryable_status(StatusCode::TOO_MANY_REQUESTS));
+        assert!(is_retryable_status(StatusCode::BAD_GATEWAY));
+        assert!(!is_retryable_status(StatusCode::BAD_REQUEST));
+        assert!(!is_retryable_status(StatusCode::UNAUTHORIZED));
+    }
+
+    #[test]
+    fn caps_server_retry_after_delay() {
+        assert_eq!(retry_delay(0, Some("30")), Duration::from_secs(2));
+        assert_eq!(retry_delay(1, None), Duration::from_millis(500));
     }
 }

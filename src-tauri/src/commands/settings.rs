@@ -7,6 +7,7 @@ use crate::{
     app::{AppState, DiagnosticError},
     config::{AppSettings, SettingsStore, SettingsView, UpdateSettings},
     errors::AppError,
+    security::provider_api_key,
 };
 
 #[derive(Serialize)]
@@ -114,14 +115,14 @@ fn set_auto_start(app: &AppHandle, enabled: bool) -> Result<(), AppError> {
 #[tauri::command]
 pub async fn test_provider(update: UpdateSettings, app: AppHandle) -> Result<String, AppError> {
     let state = app.state::<AppState>();
+    let settings = SettingsStore::validate(&update)?;
     let api_key = update
         .api_key
         .as_deref()
         .filter(|key| !key.trim().is_empty())
         .map(str::to_string)
-        .or(state.secrets.get_api_key()?)
-        .ok_or(AppError::ProviderNotConfigured)?;
-    let settings = SettingsStore::validate(&update)?;
+        .map(Ok)
+        .unwrap_or_else(|| provider_api_key(&settings, state.secrets.as_ref()))?;
     state.translation.test_connection(settings, api_key).await?;
     Ok("Connection successful".into())
 }

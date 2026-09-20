@@ -1,9 +1,23 @@
-use crate::errors::AppError;
+use crate::{config::AppSettings, errors::AppError};
 
 pub trait SecretStore: Send + Sync {
     fn save_api_key(&self, value: &str) -> Result<(), AppError>;
     fn get_api_key(&self) -> Result<Option<String>, AppError>;
     fn delete_api_key(&self) -> Result<(), AppError>;
+}
+
+pub fn provider_api_key(
+    settings: &AppSettings,
+    secrets: &dyn SecretStore,
+) -> Result<String, AppError> {
+    match secrets
+        .get_api_key()?
+        .filter(|value| !value.trim().is_empty())
+    {
+        Some(value) => Ok(value),
+        None if !settings.requires_api_key() => Ok(String::new()),
+        None => Err(AppError::ProviderNotConfigured),
+    }
 }
 
 pub struct KeyringSecretStore;

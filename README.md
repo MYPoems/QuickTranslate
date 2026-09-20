@@ -24,7 +24,8 @@ Remove-Item $installer -Force
 - 可修改的全局快捷键（默认 `Alt + Q`）
 - Windows 临时 `Ctrl + C` 选词，并尽可能恢复原剪贴板全部格式
 - 完全本地的中英文检测和文本清洗（最多 5000 字符）
-- OpenAI-compatible Provider（Base URL、Model 可配置）
+- OpenAI-compatible Provider（OpenAI、阿里云百炼、DeepSeek 与自定义端点预设）
+- Ollama、LM Studio 本地模型预设，本机连接可不配置 API Key
 - API Key 保存到 Windows Credential Manager，不写入 JSON 或 SQLite
 - SQLite 翻译缓存；缓存失败不影响正常展示
 - 本地翻译历史支持搜索、收藏、复制与删除

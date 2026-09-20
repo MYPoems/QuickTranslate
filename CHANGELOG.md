@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 - 2026-09-20
+
+- 设置页新增 OpenAI、阿里云百炼、DeepSeek、Ollama、LM Studio 和自定义 Provider 预设。
+- 切换预设时自动填写对应 Base URL 与推荐模型，仍可手动修改。
+- 本机回环地址的 Ollama/LM Studio 可在不配置 API Key 的情况下使用。
+- 仅在 API Key 非空时发送 Bearer Authorization 请求头。
+- 翻译结果和历史记录会显示实际选用的 Provider 名称。
+
 ## 0.4.0 - 2026-09-20
 
 - 新增本地翻译历史窗口，支持搜索、收藏、复制和删除。

@@ -31,6 +31,15 @@ impl Default for AppSettings {
     }
 }
 
+impl AppSettings {
+    pub fn requires_api_key(&self) -> bool {
+        reqwest::Url::parse(&self.base_url)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_string))
+            .is_none_or(|host| !is_loopback_host(Some(&host)))
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsView {
@@ -277,6 +286,14 @@ mod tests {
         assert!(SettingsStore::validate(&update("http://example.com/v1")).is_err());
         assert!(SettingsStore::validate(&update("https://user:secret@example.com/v1")).is_err());
         assert!(SettingsStore::validate(&update("file:///tmp/provider")).is_err());
+    }
+
+    #[test]
+    fn only_loopback_providers_can_run_without_api_key() {
+        let remote = SettingsStore::validate(&update("https://example.com/v1")).unwrap();
+        let local = SettingsStore::validate(&update("http://localhost:11434/v1")).unwrap();
+        assert!(remote.requires_api_key());
+        assert!(!local.requires_api_key());
     }
 
     #[test]

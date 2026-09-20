@@ -3,6 +3,17 @@ import type { AppError, DiagnosticsView, SettingsView, UpdateSettings } from "..
 import "./settings.css";
 
 const root = document.querySelector<HTMLElement>("#app")!;
+let apiKeyConfigured = false;
+const providerPresets: Record<string, { baseUrl: string; model: string }> = {
+  "OpenAI Compatible": { baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
+  "阿里云百炼": {
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model: "qwen-turbo",
+  },
+  DeepSeek: { baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
+  Ollama: { baseUrl: "http://localhost:11434/v1", model: "qwen2.5:3b" },
+  "LM Studio": { baseUrl: "http://localhost:1234/v1", model: "local-model" },
+};
 
 export function mountSettings(): void {
   root.innerHTML = `
@@ -13,10 +24,19 @@ export function mountSettings(): void {
         <p class="subtitle">配置 OpenAI-compatible 翻译服务。API Key 仅保存到 Windows 凭据管理器。</p>
       </header>
       <form id="settings-form">
-        <label>Provider<input name="provider" value="OpenAI Compatible" readonly /></label>
+        <label>Provider
+          <select name="provider">
+            <option>OpenAI Compatible</option>
+            <option>阿里云百炼</option>
+            <option>DeepSeek</option>
+            <option>Ollama</option>
+            <option>LM Studio</option>
+            <option>自定义</option>
+          </select>
+        </label>
         <label>Base URL<input name="baseUrl" type="url" required placeholder="https://api.openai.com/v1" /></label>
         <label>Model<input name="model" required placeholder="gpt-4.1-mini" /></label>
-        <label>API Key<input name="apiKey" type="password" autocomplete="off" placeholder="保持为空则不修改" /></label>
+        <label>API Key<input name="apiKey" type="password" autocomplete="off" placeholder="保持为空则不修改；本地模型可留空" /></label>
         <label>全局快捷键<input name="globalShortcut" required placeholder="Alt+Q" /></label>
         <div class="preference-card">
           <label class="checkbox-row"><input name="autoStartEnabled" type="checkbox" />开机自动启动</label>
@@ -50,6 +70,12 @@ export function mountSettings(): void {
     void save(form);
   });
   root.querySelector<HTMLButtonElement>("#test")!.addEventListener("click", () => void test(form));
+  (form.elements.namedItem("provider") as HTMLSelectElement).addEventListener("change", () =>
+    applyProviderPreset(form),
+  );
+  (form.elements.namedItem("baseUrl") as HTMLInputElement).addEventListener("input", () =>
+    refreshKeyStatus(form),
+  );
   root
     .querySelector<HTMLButtonElement>("#clear-cache")!
     .addEventListener("click", () => void clearCache());
@@ -73,7 +99,8 @@ async function load(form: HTMLFormElement): Promise<void> {
     setInput(form, "model", settings.model);
     setInput(form, "globalShortcut", settings.globalShortcut);
     setCheckbox(form, "autoStartEnabled", settings.autoStartEnabled);
-    updateKeyStatus(settings.apiKeyConfigured);
+    apiKeyConfigured = settings.apiKeyConfigured;
+    updateKeyStatus(settings.apiKeyConfigured, isLocalBaseUrl(settings.baseUrl));
     setStatus("", "neutral");
   } catch (error) {
     setStatus(errorMessage(error), "error");
@@ -88,7 +115,8 @@ async function save(form: HTMLFormElement): Promise<void> {
     (form.elements.namedItem("apiKey") as HTMLInputElement).value = "";
     (form.elements.namedItem("clearApiKey") as HTMLInputElement).checked = false;
     setCheckbox(form, "autoStartEnabled", settings.autoStartEnabled);
-    updateKeyStatus(settings.apiKeyConfigured);
+    apiKeyConfigured = settings.apiKeyConfigured;
+    updateKeyStatus(settings.apiKeyConfigured, isLocalBaseUrl(settings.baseUrl));
     setStatus("设置已保存，快捷键和开机启动立即生效", "success");
   } catch (error) {
     setStatus(errorMessage(error), "error");
@@ -181,17 +209,43 @@ function formValue(form: HTMLFormElement): UpdateSettings {
 }
 
 function setInput(form: HTMLFormElement, name: string, value: string): void {
-  (form.elements.namedItem(name) as HTMLInputElement).value = value;
+  (form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement).value = value;
 }
 
 function setCheckbox(form: HTMLFormElement, name: string, checked: boolean): void {
   (form.elements.namedItem(name) as HTMLInputElement).checked = checked;
 }
 
-function updateKeyStatus(configured: boolean): void {
+function updateKeyStatus(configured: boolean, localProvider: boolean): void {
   root.querySelector<HTMLElement>("#key-status")!.textContent = configured
     ? "已安全保存 API Key"
-    : "尚未配置 API Key";
+    : localProvider
+      ? "本地 Provider 无需 API Key"
+      : "尚未配置 API Key";
+}
+
+function applyProviderPreset(form: HTMLFormElement): void {
+  const provider = (form.elements.namedItem("provider") as HTMLSelectElement).value;
+  const preset = providerPresets[provider];
+  if (preset) {
+    setInput(form, "baseUrl", preset.baseUrl);
+    setInput(form, "model", preset.model);
+  }
+  refreshKeyStatus(form);
+}
+
+function refreshKeyStatus(form: HTMLFormElement): void {
+  const baseUrl = (form.elements.namedItem("baseUrl") as HTMLInputElement).value;
+  updateKeyStatus(apiKeyConfigured, isLocalBaseUrl(baseUrl));
+}
+
+function isLocalBaseUrl(value: string): boolean {
+  try {
+    const host = new URL(value).hostname.replace(/^\[|\]$/g, "");
+    return host === "localhost" || host === "127.0.0.1" || host === "::1";
+  } catch {
+    return false;
+  }
 }
 
 function setBusy(busy: boolean): void {

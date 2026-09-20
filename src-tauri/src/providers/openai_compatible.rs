@@ -16,6 +16,7 @@ use super::Translator;
 
 #[derive(Debug, Clone)]
 pub struct ProviderConfig {
+    pub provider: String,
     pub base_url: String,
     pub api_key: String,
     pub model: String,
@@ -100,13 +101,11 @@ impl Translator for OpenAiCompatibleProvider {
 
         let mut attempt = 0;
         let response = loop {
-            let outcome = self
-                .client
-                .post(self.endpoint())
-                .bearer_auth(&self.config.api_key)
-                .json(&body)
-                .send()
-                .await;
+            let mut request = self.client.post(self.endpoint()).json(&body);
+            if !self.config.api_key.is_empty() {
+                request = request.bearer_auth(&self.config.api_key);
+            }
+            let outcome = request.send().await;
 
             match outcome {
                 Ok(response) if is_retryable_status(response.status()) && attempt < MAX_RETRIES => {
@@ -150,7 +149,12 @@ impl Translator for OpenAiCompatibleProvider {
             .json()
             .await
             .map_err(|error| AppError::Provider(format!("API 响应格式无效: {error}")))?;
-        parse_response(response, &request, &self.config.model)
+        parse_response(
+            response,
+            &request,
+            &self.config.provider,
+            &self.config.model,
+        )
     }
 }
 
@@ -178,6 +182,7 @@ fn map_reqwest_error(error: reqwest::Error) -> AppError {
 fn parse_response(
     response: ChatResponse,
     request: &TranslationRequest,
+    provider: &str,
     model: &str,
 ) -> Result<TranslationResult, AppError> {
     let content = response
@@ -192,7 +197,7 @@ fn parse_response(
         translation: content.to_string(),
         detected_language: request.source_language,
         target_language: request.target_language,
-        provider: "OpenAI Compatible".into(),
+        provider: provider.into(),
         model: model.into(),
         cached: false,
         phonetic: None,
@@ -245,7 +250,8 @@ mod tests {
                 },
             }],
         };
-        let result = parse_response(response, &request("Hello world."), "test").unwrap();
+        let result =
+            parse_response(response, &request("Hello world."), "Test Provider", "test").unwrap();
         assert_eq!(result.translation, "你好，世界。");
     }
 
@@ -258,7 +264,8 @@ mod tests {
                 },
             }],
         };
-        let result = parse_response(response, &request("architecture"), "test").unwrap();
+        let result =
+            parse_response(response, &request("architecture"), "Test Provider", "test").unwrap();
         assert_eq!(result.translation, "架构");
         assert_eq!(result.definitions, vec!["体系结构"]);
     }
@@ -266,7 +273,7 @@ mod tests {
     #[test]
     fn rejects_empty_choices() {
         let response = ChatResponse { choices: vec![] };
-        assert!(parse_response(response, &request("hello"), "test").is_err());
+        assert!(parse_response(response, &request("hello"), "Test Provider", "test").is_err());
     }
 
     #[test]

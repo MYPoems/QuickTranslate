@@ -15,7 +15,7 @@ use crate::{
     config::SettingsStore,
     errors::AppError,
     platform,
-    security::{KeyringSecretStore, SecretStore},
+    security::{provider_api_key, KeyringSecretStore, SecretStore},
     storage::TranslationCache,
     translation::{service::TranslationService, types::TranslationResult},
     window,
@@ -155,19 +155,19 @@ pub fn trigger_selected_translation(app: AppHandle) -> u64 {
         );
 
         let state = app.state::<AppState>();
-        let translation = match (state.settings.get(), state.secrets.get_api_key()) {
-            (Ok(settings), Ok(Some(api_key))) if !api_key.trim().is_empty() => {
-                Some((settings, api_key))
-            }
-            (Ok(_), Ok(_)) => None,
-            (Err(error), _) | (_, Err(error)) => {
+        let settings = match state.settings.get() {
+            Ok(settings) => settings,
+            Err(error) => {
                 show_error(&app, request_id, error, false);
                 return;
             }
         };
-        let Some((settings, api_key)) = translation else {
-            show_error(&app, request_id, AppError::ProviderNotConfigured, false);
-            return;
+        let api_key = match provider_api_key(&settings, state.secrets.as_ref()) {
+            Ok(api_key) => api_key,
+            Err(error) => {
+                show_error(&app, request_id, error, false);
+                return;
+            }
         };
         let Some(outcome) = cancellation
             .run_until_cancelled(state.translation.translate(selected, settings, api_key))

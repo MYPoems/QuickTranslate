@@ -6,8 +6,8 @@ h1 { margin: 0; font-size: 26px; letter-spacing: -.025em; }
 .subtitle { margin: 8px 0 0; color: #71717a; font-size: 13px; line-height: 1.55; }
 form { display: grid; gap: 16px; }
 label { display: grid; gap: 7px; color: #3f3f46; font-size: 13px; font-weight: 600; }
-input { width: 100%; border: 1px solid #d4d4d8; border-radius: 8px; outline: none; padding: 10px 11px; background: #fff; color: #18181b; font-size: 14px; font-weight: 400; }
-input:focus { border-color: #71717a; box-shadow: 0 0 0 3px rgba(113,113,122,.12); }
+input, select { width: 100%; border: 1px solid #d4d4d8; border-radius: 8px; outline: none; padding: 10px 11px; background: #fff; color: #18181b; font-size: 14px; font-weight: 400; }
+input:focus, select:focus { border-color: #71717a; box-shadow: 0 0 0 3px rgba(113,113,122,.12); }
 input[readonly] { background: #e4e4e7; color: #52525b; }
 .checkbox-row { display: flex; align-items: center; gap: 8px; font-weight: 400; }
 .checkbox-row input { width: 15px; height: 15px; margin: 0; }
@@ -33,7 +33,7 @@ input[readonly] { background: #e4e4e7; color: #52525b; }
   .settings-window { background: #18181b; }
   .subtitle, .eyebrow, .key-status { color: #a1a1aa; }
   label { color: #d4d4d8; }
-  input { border-color: #52525b; background: #27272a; color: #fafafa; }
+  input, select { border-color: #52525b; background: #27272a; color: #fafafa; }
   input[readonly] { background: #3f3f46; color: #d4d4d8; }
   .preference-card { border-color: #52525b; background: #27272a; }
   .preference-card p { color: #a1a1aa; }

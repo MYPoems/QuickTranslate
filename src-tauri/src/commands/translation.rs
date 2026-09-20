@@ -4,6 +4,7 @@ use crate::{
     app::{trigger_selected_translation, AppState},
     errors::AppError,
     platform,
+    security::provider_api_key,
     storage::HistoryEntry,
     translation::types::TranslationResult,
 };
@@ -17,11 +18,7 @@ pub fn translate_selected_text(app: AppHandle) -> u64 {
 pub async fn translate_text(text: String, app: AppHandle) -> Result<TranslationResult, AppError> {
     let state = app.state::<AppState>();
     let settings = state.settings.get()?;
-    let api_key = state
-        .secrets
-        .get_api_key()?
-        .filter(|value| !value.trim().is_empty())
-        .ok_or(AppError::ProviderNotConfigured)?;
+    let api_key = provider_api_key(&settings, state.secrets.as_ref())?;
     state.translation.translate(text, settings, api_key).await
 }
 
@@ -29,11 +26,7 @@ pub async fn translate_text(text: String, app: AppHandle) -> Result<TranslationR
 pub async fn retranslate_text(text: String, app: AppHandle) -> Result<TranslationResult, AppError> {
     let state = app.state::<AppState>();
     let settings = state.settings.get()?;
-    let api_key = state
-        .secrets
-        .get_api_key()?
-        .filter(|value| !value.trim().is_empty())
-        .ok_or(AppError::ProviderNotConfigured)?;
+    let api_key = provider_api_key(&settings, state.secrets.as_ref())?;
     state
         .translation
         .translate_fresh(text, settings, api_key)

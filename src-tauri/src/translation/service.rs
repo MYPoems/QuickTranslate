@@ -72,6 +72,7 @@ impl TranslationService {
         let provider = OpenAiCompatibleProvider::new(
             self.client.clone(),
             ProviderConfig {
+                provider: settings.provider,
                 base_url: settings.base_url,
                 api_key,
                 model: settings.model,
@@ -102,6 +103,7 @@ impl TranslationService {
         let provider = OpenAiCompatibleProvider::new(
             self.client.clone(),
             ProviderConfig {
+                provider: settings.provider,
                 base_url: settings.base_url,
                 api_key,
                 model: settings.model,

@@ -1,4 +1,4 @@
-use tauri::{AppHandle, Manager, PhysicalPosition, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
 
 use crate::platform;
 
@@ -38,6 +38,12 @@ pub fn show_settings(app: &AppHandle) {
         .build();
 }
 
+pub fn prepare_ocr_popup(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("popup") {
+        let _ = window.set_size(PhysicalSize::new(480, 420));
+    }
+}
+
 pub fn show_history(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("history") {
         let _ = window.show();
@@ -52,4 +58,38 @@ pub fn show_history(app: &AppHandle) {
         .resizable(true)
         .center()
         .build();
+}
+
+pub fn show_ocr_overlay(app: &AppHandle) {
+    let Some(bounds) = platform::ocr_monitor_bounds() else {
+        return;
+    };
+    if let Some(popup) = app.get_webview_window("popup") {
+        let _ = popup.hide();
+    }
+    let window = if let Some(window) = app.get_webview_window("ocr") {
+        window
+    } else {
+        let Ok(window) =
+            WebviewWindowBuilder::new(app, "ocr", WebviewUrl::App("index.html".into()))
+                .title("QuickTranslate OCR")
+                .inner_size(bounds.width as f64, bounds.height as f64)
+                .position(bounds.left as f64, bounds.top as f64)
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .skip_taskbar(true)
+                .resizable(false)
+                .shadow(false)
+                .visible(false)
+                .build()
+        else {
+            return;
+        };
+        window
+    };
+    let _ = window.set_position(PhysicalPosition::new(bounds.left, bounds.top));
+    let _ = window.set_size(PhysicalSize::new(bounds.width, bounds.height));
+    let _ = window.show();
+    let _ = window.set_focus();
 }

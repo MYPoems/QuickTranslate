@@ -9,6 +9,12 @@
 .badge { flex: none; border-radius: 999px; padding: 2px 7px; background: #e4e4e7; color: #52525b; font-size: 11px; }
 .content { flex: 1; min-height: 72px; overflow-y: auto; padding: 5px 15px 15px; }
 .content.idle, .content.loading, .content.error { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.inline-loading { display: flex; align-items: center; justify-content: center; gap: 9px; padding: 15px 0 3px; }
+.inline-loading p { margin: 0; color: #71717a; font-size: 13px; }
+.recognized-section { margin: 0 0 13px; border-bottom: 1px solid #e4e4e7; padding: 0 0 12px; }
+.section-label { margin: 0 0 5px; color: #a1a1aa; font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.recognized-text { max-height: 150px; overflow-y: auto; margin: 0; color: #52525b; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+.ocr-content .translation { font-size: 16px; }
 .hint, .loading p { margin: 0; color: #71717a; font-size: 14px; }
 .spinner { width: 14px; height: 14px; border: 2px solid #d4d4d8; border-top-color: #27272a; border-radius: 50%; animation: spin 0.75s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -29,6 +35,8 @@
 @media (prefers-color-scheme: dark) {
   .popup-shell { border-color: rgba(255,255,255,.1); background: rgba(24,24,27,.98); box-shadow: 0 16px 44px rgba(0,0,0,.48); }
   .source, .hint, .loading p, .word-detail, .example { color: #a1a1aa; }
+  .inline-loading p, .section-label, .recognized-text { color: #a1a1aa; }
+  .recognized-section { border-color: #3f3f46; }
   .badge { background: #3f3f46; color: #d4d4d8; }
   .translation { color: #fafafa; }
   .definitions { color: #d4d4d8; }

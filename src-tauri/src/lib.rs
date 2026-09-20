@@ -21,7 +21,7 @@ use app::{trigger_selected_translation, AppState};
 #[cfg(not(test))]
 use tauri::Manager;
 #[cfg(not(test))]
-use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, ShortcutState};
+use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, Shortcut, ShortcutState};
 
 #[cfg(not(test))]
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -33,9 +33,19 @@ pub fn run() {
         ))
         .plugin(
             ShortcutBuilder::new()
-                .with_handler(|app, _shortcut, event| {
+                .with_handler(|app, shortcut, event| {
                     if event.state == ShortcutState::Pressed {
-                        trigger_selected_translation(app.clone());
+                        let settings = app.state::<AppState>().settings.get();
+                        let is_ocr = settings
+                            .as_ref()
+                            .ok()
+                            .and_then(|settings| settings.ocr_shortcut.parse::<Shortcut>().ok())
+                            .is_some_and(|configured| configured == *shortcut);
+                        if is_ocr {
+                            window::show_ocr_overlay(app);
+                        } else {
+                            trigger_selected_translation(app.clone());
+                        }
                     }
                 })
                 .build(),
@@ -43,20 +53,22 @@ pub fn run() {
         .setup(|app| {
             let state = AppState::initialize(app.handle())
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
-            let shortcut = state
+            let settings = state
                 .settings
                 .get()
-                .map_err(|error| anyhow::anyhow!(error.to_string()))?
-                .global_shortcut;
+                .map_err(|error| anyhow::anyhow!(error.to_string()))?;
             app.manage(state);
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
-            app.global_shortcut().register(shortcut.as_str())?;
+            app.global_shortcut()
+                .register(settings.global_shortcut.as_str())?;
+            app.global_shortcut()
+                .register(settings.ocr_shortcut.as_str())?;
             tray::setup(app)?;
             Ok(())
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. }
-                if matches!(window.label(), "popup" | "settings" | "history") =>
+                if matches!(window.label(), "popup" | "settings" | "history" | "ocr") =>
             {
                 api.prevent_close();
                 let _ = window.hide();
@@ -80,6 +92,8 @@ pub fn run() {
             commands::translation::delete_history_entry,
             commands::translation::get_popup_pinned,
             commands::translation::set_popup_pinned,
+            commands::ocr::recognize_ocr_region,
+            commands::ocr::hide_ocr_window,
             commands::translation::hide_translation_window,
             commands::settings::get_settings,
             commands::settings::save_settings,

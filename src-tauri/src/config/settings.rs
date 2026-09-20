@@ -18,6 +18,7 @@ pub struct AppSettings {
     pub base_url: String,
     pub model: String,
     pub global_shortcut: String,
+    pub ocr_shortcut: String,
 }
 
 impl Default for AppSettings {
@@ -27,6 +28,7 @@ impl Default for AppSettings {
             base_url: "https://api.openai.com/v1".into(),
             model: "gpt-4.1-mini".into(),
             global_shortcut: "Alt+Q".into(),
+            ocr_shortcut: "Alt+W".into(),
         }
     }
 }
@@ -47,6 +49,7 @@ pub struct SettingsView {
     pub base_url: String,
     pub model: String,
     pub global_shortcut: String,
+    pub ocr_shortcut: String,
     pub api_key_configured: bool,
     pub auto_start_enabled: bool,
 }
@@ -58,6 +61,7 @@ pub struct UpdateSettings {
     pub base_url: String,
     pub model: String,
     pub global_shortcut: String,
+    pub ocr_shortcut: String,
     pub api_key: Option<String>,
     #[serde(default)]
     pub clear_api_key: bool,
@@ -101,6 +105,7 @@ impl SettingsStore {
             base_url: settings.base_url,
             model: settings.model,
             global_shortcut: settings.global_shortcut,
+            ocr_shortcut: settings.ocr_shortcut,
             api_key_configured: secrets.get_api_key()?.is_some(),
             auto_start_enabled,
         })
@@ -110,8 +115,16 @@ impl SettingsStore {
         let provider = update.provider.trim().to_string();
         let model = update.model.trim().to_string();
         let global_shortcut = update.global_shortcut.trim().to_string();
-        if provider.is_empty() || model.is_empty() || global_shortcut.is_empty() {
+        let ocr_shortcut = update.ocr_shortcut.trim().to_string();
+        if provider.is_empty()
+            || model.is_empty()
+            || global_shortcut.is_empty()
+            || ocr_shortcut.is_empty()
+        {
             return Err(AppError::Settings("required settings are empty".into()));
+        }
+        if global_shortcut.eq_ignore_ascii_case(&ocr_shortcut) {
+            return Err(AppError::Settings("划词翻译与 OCR 快捷键不能相同".into()));
         }
 
         Ok(AppSettings {
@@ -119,6 +132,7 @@ impl SettingsStore {
             base_url: validate_base_url(&update.base_url)?,
             model,
             global_shortcut,
+            ocr_shortcut,
         })
     }
 
@@ -267,6 +281,7 @@ mod tests {
             base_url: base_url.into(),
             model: "test-model".into(),
             global_shortcut: "Alt+Q".into(),
+            ocr_shortcut: "Alt+W".into(),
             api_key: None,
             clear_api_key: false,
             auto_start_enabled: false,
@@ -294,6 +309,22 @@ mod tests {
         let local = SettingsStore::validate(&update("http://localhost:11434/v1")).unwrap();
         assert!(remote.requires_api_key());
         assert!(!local.requires_api_key());
+    }
+
+    #[test]
+    fn migrates_missing_ocr_shortcut_and_rejects_duplicates() {
+        let legacy = r#"{
+          "provider": "OpenAI Compatible",
+          "baseUrl": "https://api.openai.com/v1",
+          "model": "gpt-4.1-mini",
+          "globalShortcut": "Alt+Q"
+        }"#;
+        let migrated: AppSettings = serde_json::from_str(legacy).unwrap();
+        assert_eq!(migrated.ocr_shortcut, "Alt+W");
+
+        let mut duplicate = update("https://example.com/v1");
+        duplicate.ocr_shortcut = duplicate.global_shortcut.clone();
+        assert!(SettingsStore::validate(&duplicate).is_err());
     }
 
     #[test]

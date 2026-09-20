@@ -59,7 +59,7 @@ pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsV
     };
 
     let result = (|| -> Result<(), AppError> {
-        replace_shortcut(&app, &candidate.global_shortcut)?;
+        replace_shortcuts(&app, &candidate.global_shortcut, &candidate.ocr_shortcut)?;
         set_auto_start(&app, update.auto_start_enabled)?;
         replace_api_key(state.secrets.as_ref(), desired_api_key.as_deref())?;
         state.settings.replace(candidate)?;
@@ -70,7 +70,7 @@ pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsV
         let _ = state.settings.replace(previous.clone());
         let _ = replace_api_key(state.secrets.as_ref(), previous_api_key.as_deref());
         let _ = set_auto_start(&app, previous_auto_start);
-        let _ = replace_shortcut(&app, &previous.global_shortcut);
+        let _ = replace_shortcuts(&app, &previous.global_shortcut, &previous.ocr_shortcut);
         state.record_error(&error);
         return Err(error);
     }
@@ -83,12 +83,15 @@ pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsV
     )
 }
 
-fn replace_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), AppError> {
+fn replace_shortcuts(app: &AppHandle, translation: &str, ocr: &str) -> Result<(), AppError> {
     app.global_shortcut()
         .unregister_all()
         .map_err(|error| AppError::InvalidShortcut(error.to_string()))?;
     app.global_shortcut()
-        .register(shortcut)
+        .register(translation)
+        .map_err(|error| AppError::InvalidShortcut(error.to_string()))?;
+    app.global_shortcut()
+        .register(ocr)
         .map_err(|error| AppError::InvalidShortcut(error.to_string()))
 }
 

@@ -7,6 +7,7 @@ const root = document.querySelector<HTMLElement>("#app")!;
 let currentRequestId = 0;
 let currentSource = "";
 let currentTranslation = "";
+let currentSourceKind: "selection" | "ocr" = "selection";
 let pinned = false;
 
 export function mountPopup(): void {
@@ -73,11 +74,22 @@ function render(event: TranslationEvent): void {
   const badge = root.querySelector<HTMLElement>("#badge")!;
 
   if (event.status === "loading") {
+    currentSourceKind = event.sourceKind || "selection";
     currentSource = event.sourceText || "";
     currentTranslation = "";
-    source.textContent = currentSource || "选中的文字";
-    content.className = "content loading";
-    content.innerHTML = `<div class="spinner" aria-hidden="true"></div><p>正在翻译…</p>`;
+    source.textContent = currentSourceKind === "ocr" ? "OCR 识别文字与译文" : currentSource || "选中的文字";
+    if (currentSourceKind === "ocr") {
+      content.className = "content ocr-content";
+      content.replaceChildren();
+      appendOcrSource(content, currentSource);
+      const loading = document.createElement("div");
+      loading.className = "inline-loading";
+      loading.innerHTML = `<div class="spinner" aria-hidden="true"></div><p>正在翻译识别文字…</p>`;
+      content.append(loading);
+    } else {
+      content.className = "content loading";
+      content.innerHTML = `<div class="spinner" aria-hidden="true"></div><p>正在翻译…</p>`;
+    }
     copy.disabled = true;
     copySource.disabled = !currentSource;
     retranslateButton.disabled = true;
@@ -100,7 +112,10 @@ function render(event: TranslationEvent): void {
     return;
   }
 
-  if (event.result) renderResult(event.result, source, content, copy, meta, badge);
+  if (event.result) {
+    currentSourceKind = event.sourceKind || currentSourceKind;
+    renderResult(event.result, source, content, copy, meta, badge);
+  }
 }
 
 function renderResult(
@@ -113,9 +128,16 @@ function renderResult(
 ): void {
   currentSource = result.sourceText;
   currentTranslation = result.translation;
-  source.textContent = result.sourceText;
-  content.className = "content success";
+  source.textContent = currentSourceKind === "ocr" ? "OCR 识别文字与译文" : result.sourceText;
+  content.className = currentSourceKind === "ocr" ? "content success ocr-content" : "content success";
   content.replaceChildren();
+  if (currentSourceKind === "ocr") appendOcrSource(content, result.sourceText);
+  if (currentSourceKind === "ocr") {
+    const label = document.createElement("p");
+    label.className = "section-label";
+    label.textContent = "译文";
+    content.append(label);
+  }
   const translation = document.createElement("p");
   translation.className = "translation";
   translation.textContent = result.translation;
@@ -151,6 +173,19 @@ function renderResult(
   badge.hidden = false;
 }
 
+function appendOcrSource(content: HTMLElement, text: string): void {
+  const section = document.createElement("section");
+  section.className = "recognized-section";
+  const label = document.createElement("p");
+  label.className = "section-label";
+  label.textContent = "识别文字";
+  const source = document.createElement("p");
+  source.className = "recognized-text";
+  source.textContent = text;
+  section.append(label, source);
+  content.append(section);
+}
+
 async function copyText(text: string, selector: string): Promise<void> {
   if (!text) return;
   const button = root.querySelector<HTMLButtonElement>(selector)!;
@@ -169,10 +204,12 @@ async function retranslate(): Promise<void> {
   if (!currentSource) return;
   const sourceText = currentSource;
   const requestId = currentRequestId;
-  render({ requestId, status: "loading", sourceText });
+  render({ requestId, status: "loading", sourceText, sourceKind: currentSourceKind });
   try {
     const result = await invoke<TranslationResult>("retranslate_text", { text: sourceText });
-    if (currentRequestId === requestId) render({ requestId, status: "success", result });
+    if (currentRequestId === requestId) {
+      render({ requestId, status: "success", result, sourceKind: currentSourceKind });
+    }
   } catch (error) {
     if (currentRequestId === requestId) {
       render({ requestId, status: "error", error: normalizeError(error) });

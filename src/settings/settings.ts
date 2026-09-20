@@ -38,6 +38,7 @@ export function mountSettings(): void {
         <label>Model<input name="model" required placeholder="gpt-4.1-mini" /></label>
         <label>API Key<input name="apiKey" type="password" autocomplete="off" placeholder="保持为空则不修改；本地模型可留空" /></label>
         <label>全局快捷键<input name="globalShortcut" required placeholder="Alt+Q" /></label>
+        <label>OCR 截图翻译快捷键<input name="ocrShortcut" required placeholder="Alt+W" /></label>
         <div class="preference-card">
           <label class="checkbox-row"><input name="autoStartEnabled" type="checkbox" />开机自动启动</label>
           <p>登录 Windows 后在后台启动 QuickTranslate，不主动显示窗口。</p>
@@ -98,6 +99,7 @@ async function load(form: HTMLFormElement): Promise<void> {
     setInput(form, "baseUrl", settings.baseUrl);
     setInput(form, "model", settings.model);
     setInput(form, "globalShortcut", settings.globalShortcut);
+    setInput(form, "ocrShortcut", settings.ocrShortcut);
     setCheckbox(form, "autoStartEnabled", settings.autoStartEnabled);
     apiKeyConfigured = settings.apiKeyConfigured;
     updateKeyStatus(settings.apiKeyConfigured, isLocalBaseUrl(settings.baseUrl));
@@ -202,6 +204,7 @@ function formValue(form: HTMLFormElement): UpdateSettings {
     baseUrl: String(data.get("baseUrl") || "").trim(),
     model: String(data.get("model") || "").trim(),
     globalShortcut: String(data.get("globalShortcut") || "").trim(),
+    ocrShortcut: String(data.get("ocrShortcut") || "").trim(),
     apiKey: apiKey || undefined,
     clearApiKey: data.get("clearApiKey") === "on",
     autoStartEnabled: data.get("autoStartEnabled") === "on",

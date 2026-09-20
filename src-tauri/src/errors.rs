@@ -25,6 +25,10 @@ pub enum AppError {
     InvalidShortcut(String),
     #[error("autostart operation failed: {0}")]
     AutoStart(String),
+    #[error("OCR operation failed: {0}")]
+    Ocr(String),
+    #[error("OCR found no text")]
+    OcrNoText,
     #[cfg_attr(windows, allow(dead_code))]
     #[error("this platform is not supported yet")]
     UnsupportedPlatform,
@@ -46,6 +50,8 @@ impl AppError {
             Self::Settings(_) => "SETTINGS_ERROR",
             Self::InvalidShortcut(_) => "INVALID_SHORTCUT",
             Self::AutoStart(_) => "AUTOSTART_ERROR",
+            Self::Ocr(_) => "OCR_ERROR",
+            Self::OcrNoText => "OCR_NO_TEXT",
             Self::UnsupportedPlatform => "UNSUPPORTED_PLATFORM",
             Self::Internal(_) => "INTERNAL_ERROR",
         }
@@ -64,6 +70,8 @@ impl AppError {
             Self::Settings(_) => "设置保存失败".into(),
             Self::InvalidShortcut(_) => "全局快捷键格式无效或已被占用".into(),
             Self::AutoStart(_) => "无法更新开机启动设置".into(),
+            Self::Ocr(message) => format!("OCR 识别失败：{message}"),
+            Self::OcrNoText => "所选区域未识别到文字".into(),
             Self::UnsupportedPlatform => "当前平台暂不支持获取选中文字".into(),
             Self::Internal(_) => "发生内部错误，请稍后重试".into(),
         }

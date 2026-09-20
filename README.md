@@ -1,6 +1,6 @@
 # QuickTranslate
 
-QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词翻译工具。它常驻系统托盘，用户在任意应用中选中文字后按 `Alt + Q`，应用通过一次临时复制获取选区、在本地判断语言、优先查询 SQLite 缓存，再通过 OpenAI-compatible API 翻译并在鼠标附近显示结果。
+QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 OCR 翻译工具。它常驻系统托盘：选中文字后按 `Alt + Q` 可划词翻译，按 `Alt + W` 可框选屏幕区域并用 Windows 本地 OCR 识别后翻译。
 
 > 截图占位：`docs/screenshots/popup.png`、`docs/screenshots/settings.png`
 
@@ -22,6 +22,7 @@ Remove-Item $installer -Force
 
 - 系统托盘：翻译、设置、退出
 - 可修改的全局快捷键（默认 `Alt + Q`）
+- 独立 OCR 快捷键（默认 `Alt + W`），框选屏幕文字后本地识别
 - Windows 临时 `Ctrl + C` 选词，并尽可能恢复原剪贴板全部格式
 - 完全本地的中英文检测和文本清洗（最多 5000 字符）
 - OpenAI-compatible Provider（OpenAI、阿里云百炼、DeepSeek 与自定义端点预设）
@@ -32,6 +33,7 @@ Remove-Item $installer -Force
 - 鼠标附近的无标题栏、置顶悬浮窗；自动避让当前显示器工作区边缘
 - 点击悬浮窗以外的位置时自动收起，不打断当前工作流
 - 悬浮窗可固定显示，并可复制原文、复制译文或绕过缓存重新翻译
+- OCR 结果在悬浮窗中同时显示识别文字和译文
 - 可在设置中启用或关闭 Windows 登录后自动启动
 - 单词查询可显示音标、词性、释义与例句
 - request ID 并发防护，旧请求不会覆盖新结果
@@ -111,7 +113,7 @@ git switch main
 4. 按需勾选“开机自动启动”。
 5. 点击“测试连接”，成功后保存。
 
-然后在 Notepad、Edge/Chrome 或 VS Code 中选中文字，按 `Alt + Q`。
+然后在 Notepad、Edge/Chrome 或 VS Code 中选中文字，按 `Alt + Q`。对于图片、视频或无法复制的界面，按 `Alt + W` 后拖动框选文字区域；如 OCR 不可用，请在 Windows“语言和区域”中安装中文或英文语言包。
 
 ## 检查与构建
 
@@ -140,6 +142,8 @@ cargo test --manifest-path .\core-tests\Cargo.toml
 ```text
 src/
   popup/           悬浮窗 UI
+  history/         本地翻译历史 UI
+  ocr/             OCR 屏幕选区 UI
   settings/        设置 UI
   styles/          共享原生 CSS
   main.ts          按 Tauri 窗口标签加载页面
@@ -147,7 +151,7 @@ src-tauri/src/
   app.rs           应用状态、翻译触发与并发防护
   commands/        Tauri Commands
   config/          非敏感 JSON 设置
-  platform/windows Windows 剪贴板、选词、光标定位
+  platform/windows Windows 剪贴板、选词、光标定位、截图和本地 OCR
   providers/       OpenAI-compatible Provider
   security/        Windows Credential Manager 抽象
   storage/         SQLite 缓存
@@ -162,20 +166,21 @@ core-tests/         受限 GNU 环境下复用核心源码测试的 harness
 ## 安全与隐私
 
 - 选中文字只会发送给用户配置的 API Provider。
+- OCR 截图只在本机内存中交给 Windows OCR，不保存图片；识别后的文字会发送给用户配置的 Provider。
 - Release 构建不记录 API Key、Authorization Header 或翻译原文。
 - Windows 选词使用 OLE clipboard data object 尝试恢复原始剪贴板格式；如果原应用不再提供延迟渲染数据，恢复仍可能失败。
-- 建议只配置可信的 HTTPS Provider。为了支持本机 Ollama/LM Studio，MVP 未强制禁止 HTTP Base URL。
+- 远程 Provider 强制使用 HTTPS；HTTP 仅允许本机回环地址上的 Ollama/LM Studio 等服务。
 
 ## 已知限制
 
 - 第一版只在 Windows 实现选区读取；macOS/Linux 已保留平台模块边界，但会返回“不支持”。
 - 某些管理员权限应用、受保护输入框、游戏或禁用复制的控件无法通过 `Ctrl + C` 读取。
 - 全局快捷键冲突时需要在设置中更换组合。
-- 悬浮窗高度为可调整的固定初始值，长译文在窗口内部滚动。
-- 尚未实现 OCR、历史记录 UI、生词本或离线模型管理。
+- OCR 质量取决于 Windows 已安装语言包、截图清晰度和文字排版。
+- 悬浮窗高度为可调整的固定初始值，长原文或译文在窗口内部滚动。
 
 ## Roadmap
 
 1. macOS Accessibility / Linux selection clipboard 平台实现。
-2. 可选的本地 Ollama/LM Studio 预设。
-3. 缓存历史查看与可选的生词收藏。
+2. 自动更新、设置迁移备份与发布签名。
+3. 可选的本地模型下载与生命周期管理。

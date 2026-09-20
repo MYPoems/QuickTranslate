@@ -9,6 +9,9 @@ if (label === "settings") {
 } else if (label === "history") {
   document.body.classList.add("history-window");
   void import("./history/history").then(({ mountHistory }) => mountHistory());
+} else if (label === "ocr") {
+  document.body.classList.add("ocr-window");
+  void import("./ocr/ocr").then(({ mountOcr }) => mountOcr());
 } else {
   document.body.classList.add("popup-window");
   void import("./popup/popup").then(({ mountPopup }) => mountPopup());

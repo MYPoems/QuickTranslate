@@ -23,6 +23,7 @@ export interface TranslationEvent {
   requestId: number;
   status: "loading" | "success" | "error";
   sourceText?: string;
+  sourceKind?: "selection" | "ocr";
   result?: TranslationResult;
   error?: AppError;
 }
@@ -32,6 +33,7 @@ export interface SettingsView {
   baseUrl: string;
   model: string;
   globalShortcut: string;
+  ocrShortcut: string;
   apiKeyConfigured: boolean;
   autoStartEnabled: boolean;
 }
@@ -41,6 +43,7 @@ export interface UpdateSettings {
   baseUrl: string;
   model: string;
   globalShortcut: string;
+  ocrShortcut: string;
   apiKey?: string;
   clearApiKey: boolean;
   autoStartEnabled: boolean;

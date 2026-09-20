@@ -2577,7 +2577,7 @@ dependencies = [
 
 [[package]]
 name = "quicktranslate"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2594,6 +2594,7 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
  "windows",
 ]
 
@@ -3896,6 +3897,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "futures-util",
  "pin-project-lite",
  "tokio",
 ]

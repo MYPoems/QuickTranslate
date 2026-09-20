@@ -17,6 +17,10 @@ input[readonly] { background: #e4e4e7; color: #52525b; }
 .maintenance-card strong { color: #3f3f46; font-size: 13px; }
 .maintenance-card p { margin: 5px 0 0; color: #71717a; font-size: 12px; line-height: 1.45; }
 .maintenance-card button { flex: none; border-radius: 8px; padding: 8px 12px; font-size: 12px; font-weight: 600; }
+.diagnostics-card { padding: 12px 13px; border: 1px solid #d4d4d8; border-radius: 9px; background: #fff; }
+.diagnostics-card summary { cursor: pointer; color: #3f3f46; font-size: 13px; font-weight: 600; }
+.diagnostics-card pre { overflow: auto; margin: 12px 0; padding: 10px; border-radius: 7px; background: #f4f4f5; color: #3f3f46; font: 11px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; word-break: break-all; }
+.diagnostics-card button { border-radius: 8px; padding: 8px 12px; font-size: 12px; font-weight: 600; }
 .key-status { margin: -6px 0 0; color: #71717a; font-size: 12px; }
 .status { min-height: 18px; margin: -4px 0 0; font-size: 13px; }
 .status[data-kind="success"] { color: #15803d; }
@@ -36,6 +40,9 @@ input[readonly] { background: #e4e4e7; color: #52525b; }
   .maintenance-card { border-color: #52525b; background: #27272a; }
   .maintenance-card strong { color: #d4d4d8; }
   .maintenance-card p { color: #a1a1aa; }
+  .diagnostics-card { border-color: #52525b; background: #27272a; }
+  .diagnostics-card summary { color: #d4d4d8; }
+  .diagnostics-card pre { background: #18181b; color: #d4d4d8; }
   .secondary { border-color: #52525b; background: #27272a; color: #fafafa; }
   .primary { border-color: #fafafa; background: #fafafa; color: #18181b; }
   .status[data-kind="success"] { color: #86efac; }

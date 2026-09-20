@@ -75,6 +75,7 @@ pub fn run() {
             commands::settings::get_settings,
             commands::settings::save_settings,
             commands::settings::test_provider,
+            commands::settings::get_diagnostics,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run QuickTranslate");

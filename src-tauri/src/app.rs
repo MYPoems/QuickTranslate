@@ -1,13 +1,15 @@
 use std::{
+    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex, RwLock,
     },
     time::Duration,
 };
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     config::SettingsStore,
@@ -23,7 +25,17 @@ pub struct AppState {
     pub settings: Arc<SettingsStore>,
     pub secrets: Arc<dyn SecretStore>,
     pub translation: Arc<TranslationService>,
+    pub cache_path: PathBuf,
     latest_request: AtomicU64,
+    active_request: Mutex<CancellationToken>,
+    last_error: RwLock<Option<DiagnosticError>>,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagnosticError {
+    pub code: String,
+    pub message: String,
 }
 
 impl AppState {
@@ -37,9 +49,8 @@ impl AppState {
             .app_data_dir()
             .map_err(|error| AppError::Database(error.to_string()))?;
         let settings = Arc::new(SettingsStore::load(config_dir.join("settings.json"))?);
-        let cache = Arc::new(TranslationCache::open(
-            &data_dir.join("translations.sqlite3"),
-        )?);
+        let cache_path = data_dir.join("translations.sqlite3");
+        let cache = Arc::new(TranslationCache::open(&cache_path)?);
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))
@@ -51,16 +62,38 @@ impl AppState {
             settings,
             secrets: Arc::new(KeyringSecretStore),
             translation: Arc::new(TranslationService::new(client, cache)),
+            cache_path,
             latest_request: AtomicU64::new(0),
+            active_request: Mutex::new(CancellationToken::new()),
+            last_error: RwLock::new(None),
         })
     }
 
-    fn next_request(&self) -> u64 {
-        self.latest_request.fetch_add(1, Ordering::Relaxed) + 1
+    fn begin_request(&self) -> (u64, CancellationToken) {
+        let request_id = self.latest_request.fetch_add(1, Ordering::Relaxed) + 1;
+        let next = CancellationToken::new();
+        if let Ok(mut active) = self.active_request.lock() {
+            active.cancel();
+            *active = next.clone();
+        }
+        (request_id, next)
     }
 
     fn is_latest(&self, request_id: u64) -> bool {
         self.latest_request.load(Ordering::Relaxed) == request_id
+    }
+
+    pub fn record_error(&self, error: &AppError) {
+        if let Ok(mut last_error) = self.last_error.write() {
+            *last_error = Some(DiagnosticError {
+                code: error.code().to_string(),
+                message: error.user_message().to_string(),
+            });
+        }
+    }
+
+    pub fn last_error(&self) -> Option<DiagnosticError> {
+        self.last_error.read().ok().and_then(|error| error.clone())
     }
 }
 
@@ -78,9 +111,15 @@ struct PopupPayload {
 }
 
 pub fn trigger_selected_translation(app: AppHandle) -> u64 {
-    let request_id = app.state::<AppState>().next_request();
+    let (request_id, cancellation) = app.state::<AppState>().begin_request();
     tauri::async_runtime::spawn(async move {
-        let selected = match platform::get_selected_text().await {
+        let Some(selected) = cancellation
+            .run_until_cancelled(platform::get_selected_text())
+            .await
+        else {
+            return;
+        };
+        let selected = match selected {
             Ok(text) => text,
             Err(error) => {
                 show_error(&app, request_id, error, true);
@@ -106,15 +145,25 @@ pub fn trigger_selected_translation(app: AppHandle) -> u64 {
         );
 
         let state = app.state::<AppState>();
-        let outcome = match (state.settings.get(), state.secrets.get_api_key()) {
+        let translation = match (state.settings.get(), state.secrets.get_api_key()) {
             (Ok(settings), Ok(Some(api_key))) if !api_key.trim().is_empty() => {
-                state
-                    .translation
-                    .translate(selected, settings, api_key)
-                    .await
+                Some((settings, api_key))
             }
-            (Ok(_), Ok(_)) => Err(AppError::ProviderNotConfigured),
-            (Err(error), _) | (_, Err(error)) => Err(error),
+            (Ok(_), Ok(_)) => None,
+            (Err(error), _) | (_, Err(error)) => {
+                show_error(&app, request_id, error, false);
+                return;
+            }
+        };
+        let Some((settings, api_key)) = translation else {
+            show_error(&app, request_id, AppError::ProviderNotConfigured, false);
+            return;
+        };
+        let Some(outcome) = cancellation
+            .run_until_cancelled(state.translation.translate(selected, settings, api_key))
+            .await
+        else {
+            return;
         };
 
         if !state.is_latest(request_id) {
@@ -141,9 +190,11 @@ pub fn trigger_selected_translation(app: AppHandle) -> u64 {
 }
 
 fn show_error(app: &AppHandle, request_id: u64, error: AppError, ensure_visible: bool) {
-    if !app.state::<AppState>().is_latest(request_id) {
+    let state = app.state::<AppState>();
+    if !state.is_latest(request_id) {
         return;
     }
+    state.record_error(&error);
     if ensure_visible {
         window::show_popup(app);
     }

@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppError, SettingsView, UpdateSettings } from "../types";
+import type { AppError, DiagnosticsView, SettingsView, UpdateSettings } from "../types";
 import "./settings.css";
 
 const root = document.querySelector<HTMLElement>("#app")!;
@@ -29,6 +29,11 @@ export function mountSettings(): void {
           </div>
           <button id="clear-cache" type="button" class="secondary">清理缓存</button>
         </div>
+        <details class="diagnostics-card">
+          <summary>诊断信息（不包含 API Key）</summary>
+          <pre id="diagnostics">展开后读取诊断信息</pre>
+          <button id="copy-diagnostics" type="button" class="secondary">复制诊断信息</button>
+        </details>
         <label class="checkbox-row"><input name="clearApiKey" type="checkbox" />删除已保存的 API Key</label>
         <p id="key-status" class="key-status"></p>
         <p id="status" class="status" role="status"></p>
@@ -48,6 +53,14 @@ export function mountSettings(): void {
   root
     .querySelector<HTMLButtonElement>("#clear-cache")!
     .addEventListener("click", () => void clearCache());
+  root
+    .querySelector<HTMLDetailsElement>(".diagnostics-card")!
+    .addEventListener("toggle", (event) => {
+      if ((event.currentTarget as HTMLDetailsElement).open) void loadDiagnostics();
+    });
+  root
+    .querySelector<HTMLButtonElement>("#copy-diagnostics")!
+    .addEventListener("click", () => void copyDiagnostics());
   void load(form);
 }
 
@@ -108,6 +121,49 @@ async function clearCache(): Promise<void> {
   } finally {
     setBusy(false);
   }
+}
+
+async function loadDiagnostics(): Promise<string> {
+  const output = root.querySelector<HTMLElement>("#diagnostics")!;
+  output.textContent = "正在读取…";
+  try {
+    const diagnostics = await invoke<DiagnosticsView>("get_diagnostics");
+    const text = formatDiagnostics(diagnostics);
+    output.textContent = text;
+    return text;
+  } catch (error) {
+    const message = errorMessage(error);
+    output.textContent = message;
+    throw error;
+  }
+}
+
+async function copyDiagnostics(): Promise<void> {
+  setBusy(true);
+  try {
+    const text = await loadDiagnostics();
+    await invoke("copy_translation", { text });
+    setStatus("诊断信息已复制（不包含 API Key）", "success");
+  } catch (error) {
+    setStatus(errorMessage(error), "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+function formatDiagnostics(value: DiagnosticsView): string {
+  const lines = [
+    `QuickTranslate ${value.appVersion}`,
+    `Provider: ${value.provider}`,
+    `Base URL: ${value.baseUrl}`,
+    `Model: ${value.model}`,
+    `API Key configured: ${value.apiKeyConfigured ? "yes" : "no"}`,
+    `Cache entries: ${value.cacheEntries}`,
+    `Settings: ${value.settingsPath}`,
+    `Cache: ${value.cachePath}`,
+  ];
+  if (value.lastError) lines.push(`Last error: ${value.lastError.code} - ${value.lastError.message}`);
+  return lines.join("\n");
 }
 
 function formValue(form: HTMLFormElement): UpdateSettings {

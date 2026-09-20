@@ -117,8 +117,7 @@ impl TranslationCache {
         Ok(connection.execute("DELETE FROM translation_cache", [])?)
     }
 
-    #[cfg(test)]
-    fn len(&self) -> Result<i64, AppError> {
+    pub fn len(&self) -> Result<i64, AppError> {
         let connection = self
             .connection
             .lock()

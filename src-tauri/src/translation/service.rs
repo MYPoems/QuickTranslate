@@ -102,4 +102,11 @@ impl TranslationService {
             .await
             .map_err(|error| AppError::Internal(error.to_string()))?
     }
+
+    pub async fn cache_size(&self) -> Result<i64, AppError> {
+        let cache = Arc::clone(&self.cache);
+        tokio::task::spawn_blocking(move || cache.len())
+            .await
+            .map_err(|error| AppError::Internal(error.to_string()))?
+    }
 }

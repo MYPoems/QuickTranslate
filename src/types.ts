@@ -45,3 +45,15 @@ export interface UpdateSettings {
   clearApiKey: boolean;
   autoStartEnabled: boolean;
 }
+
+export interface DiagnosticsView {
+  appVersion: string;
+  provider: string;
+  baseUrl: string;
+  model: string;
+  apiKeyConfigured: boolean;
+  cacheEntries: number;
+  settingsPath: string;
+  cachePath: string;
+  lastError?: AppError;
+}

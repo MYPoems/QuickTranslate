@@ -1,15 +1,17 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{
-    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder, Window,
+    AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
+    WebviewWindowBuilder, Window,
 };
 
-use crate::platform;
+use crate::{app::AppState, platform};
 
 static OCR_OVERLAY_HAS_FOCUS: AtomicBool = AtomicBool::new(false);
 
 pub fn show_popup(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("popup") {
+        apply_remembered_popup_size(app, &window);
         let (width, height) = window
             .outer_size()
             .map(|size| {
@@ -18,7 +20,7 @@ pub fn show_popup(app: &AppHandle) {
                     i32::try_from(size.height).unwrap_or(i32::MAX),
                 )
             })
-            .unwrap_or((420, 260));
+            .unwrap_or((520, 380));
 
         if let Some(position) = platform::popup_placement(width, height) {
             let _ = window.set_position(PhysicalPosition::new(position.x, position.y));
@@ -26,6 +28,17 @@ pub fn show_popup(app: &AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+pub fn restore_popup_size(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("popup") {
+        apply_remembered_popup_size(app, &window);
+    }
+}
+
+fn apply_remembered_popup_size(app: &AppHandle, window: &tauri::WebviewWindow) {
+    let size = app.state::<AppState>().popup_size.current();
+    let _ = window.set_size(LogicalSize::new(size.width, size.height));
 }
 
 pub fn show_settings(app: &AppHandle) {
@@ -42,12 +55,6 @@ pub fn show_settings(app: &AppHandle) {
         .resizable(true)
         .center()
         .build();
-}
-
-pub fn prepare_ocr_popup(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("popup") {
-        let _ = window.set_size(PhysicalSize::new(480, 420));
-    }
 }
 
 pub fn show_history(app: &AppHandle) {

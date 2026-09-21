@@ -17,6 +17,7 @@ mod tray;
 mod update;
 #[cfg(not(test))]
 mod window;
+mod window_state;
 
 #[cfg(not(test))]
 use app::{trigger_selected_translation, AppState};
@@ -60,6 +61,7 @@ pub fn run() {
                 .get()
                 .map_err(|error| anyhow::anyhow!(error.to_string()))?;
             app.manage(state);
+            window::restore_popup_size(app.handle());
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
             app.global_shortcut()
                 .register(settings.global_shortcut.as_str())?;
@@ -83,6 +85,18 @@ pub fn run() {
             }
             tauri::WindowEvent::Focused(focused) if window.label() == "ocr" => {
                 window::handle_ocr_focus_change(window, *focused);
+            }
+            tauri::WindowEvent::Resized(size) if window.label() == "popup" => {
+                let scale_factor = window.scale_factor().unwrap_or(1.0);
+                let logical = size.to_logical::<f64>(scale_factor);
+                let popup_size =
+                    std::sync::Arc::clone(&window.app_handle().state::<AppState>().popup_size);
+                if let Some(revision) = popup_size.update(logical.width, logical.height) {
+                    tauri::async_runtime::spawn(async move {
+                        tokio::time::sleep(window_state::SAVE_DEBOUNCE).await;
+                        let _ = popup_size.persist_if_current(revision);
+                    });
+                }
             }
             _ => {}
         })

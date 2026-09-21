@@ -19,6 +19,7 @@ use crate::{
     storage::TranslationCache,
     translation::{service::TranslationService, types::TranslationResult},
     window,
+    window_state::PopupSizeStore,
 };
 
 pub struct AppState {
@@ -28,6 +29,7 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub cache_path: PathBuf,
     pub ocr_plugin_dir: PathBuf,
+    pub popup_size: Arc<PopupSizeStore>,
     latest_request: AtomicU64,
     popup_pinned: AtomicBool,
     active_request: Mutex<CancellationToken>,
@@ -52,6 +54,7 @@ impl AppState {
             .app_data_dir()
             .map_err(|error| AppError::Database(error.to_string()))?;
         let settings = Arc::new(SettingsStore::load(config_dir.join("settings.json"))?);
+        let popup_size = Arc::new(PopupSizeStore::load(config_dir.join("popup-window.json")));
         let cache_path = data_dir.join("translations.sqlite3");
         let ocr_plugin_dir = crate::ocr::plugin::plugin_dir(&data_dir);
         let cache = Arc::new(TranslationCache::open(&cache_path)?);
@@ -69,6 +72,7 @@ impl AppState {
             http_client: client,
             cache_path,
             ocr_plugin_dir,
+            popup_size,
             latest_request: AtomicU64::new(0),
             popup_pinned: AtomicBool::new(false),
             active_request: Mutex::new(CancellationToken::new()),
@@ -163,7 +167,6 @@ pub fn trigger_ocr_translation(app: AppHandle, recognized_text: String) -> u64 {
 
 pub fn begin_ocr_recognition(app: &AppHandle) -> u64 {
     let (request_id, _) = app.state::<AppState>().begin_request();
-    window::prepare_ocr_popup(app);
     window::show_popup(app);
     let _ = app.emit_to(
         "popup",
@@ -209,9 +212,6 @@ async fn translate_request(
 ) {
     if !app.state::<AppState>().is_latest(request_id) {
         return;
-    }
-    if source_kind == "ocr" {
-        window::prepare_ocr_popup(&app);
     }
     window::show_popup(&app);
     let source_text = source_text.trim().to_string();

@@ -11,7 +11,7 @@ QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 O
 ```powershell
 $installer = Join-Path $env:TEMP "QuickTranslate_1.0.0_x64-setup.exe"
 Invoke-WebRequest "https://github.com/MYPoems/QuickTranslate/releases/download/v1.0.0/QuickTranslate_1.0.0_x64-setup.exe" -OutFile $installer
-if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "64E2C76BECFBBA6D9280B55E083F1FDD83773BFBA5AA8A85667B5C3858A90602") { Remove-Item $installer -Force; throw "安装包校验失败，请勿运行" }
+if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "F8ED1532E7F49BDCC5D84FE7061E04DA6B09E7F8F694A6770D98CDC90280838D") { Remove-Item $installer -Force; throw "安装包校验失败，请勿运行" }
 Start-Process $installer -Wait
 Remove-Item $installer -Force
 ```
@@ -34,6 +34,7 @@ Remove-Item $installer -Force
 - SQLite 翻译缓存；缓存失败不影响正常展示
 - 本地翻译历史支持搜索、收藏、复制与删除
 - 鼠标附近的无标题栏、置顶悬浮窗；自动避让当前显示器工作区边缘
+- 悬浮窗默认尺寸为 `520 × 380`，手动调整后会在下次弹出及重启应用后保持该尺寸
 - 点击悬浮窗以外的位置时自动收起，不打断当前工作流
 - 悬浮窗可固定显示，并可复制原文、复制译文或绕过缓存重新翻译
 - OCR 结果在悬浮窗中同时显示识别文字和译文

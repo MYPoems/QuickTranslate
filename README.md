@@ -6,12 +6,12 @@ QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 O
 
 ## 安装正式版（普通用户）
 
-支持 Windows x64。普通用户不需要安装 Git、Node.js、Rust 或 Visual Studio Build Tools。使用 PowerShell 执行以下命令即可下载、校验并运行 `v0.2.0` 安装程序：
+支持 Windows x64。普通用户不需要安装 Git、Node.js、Rust 或 Visual Studio Build Tools。使用 PowerShell 执行以下命令即可下载、校验并运行 `v1.0.0` 安装程序：
 
 ```powershell
-$installer = Join-Path $env:TEMP "QuickTranslate_0.2.0_x64-setup.exe"
-Invoke-WebRequest "https://github.com/MYPoems/QuickTranslate/releases/download/v0.2.0/QuickTranslate_0.2.0_x64-setup.exe" -OutFile $installer
-if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "A5CFFEF69736BFABECC30DA185C09331FDB023A0202EA2160E2721D575BCECFD") { Remove-Item $installer -Force; throw "安装包校验失败，请勿运行" }
+$installer = Join-Path $env:TEMP "QuickTranslate_1.0.0_x64-setup.exe"
+Invoke-WebRequest "https://github.com/MYPoems/QuickTranslate/releases/download/v1.0.0/QuickTranslate_1.0.0_x64-setup.exe" -OutFile $installer
+if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "4CE6A17E57A22036001AE3B5A0D3C0739B359F65A1EDBD26F18A50FE377714E7") { Remove-Item $installer -Force; throw "安装包校验失败，请勿运行" }
 Start-Process $installer -Wait
 Remove-Item $installer -Force
 ```
@@ -42,6 +42,7 @@ Remove-Item $installer -Force
 - 翻译缓存最多保留 1000 条，并可在设置中一键清理
 - 设置保存失败时自动恢复快捷键、开机启动、凭据和旧配置
 - 设置页可复制不包含 API Key 的诊断信息
+- 设置页可导出/恢复不含 API Key 的 JSON 备份，并检查 GitHub 正式更新
 - 浅色/深色自动适配，无前端 UI 框架和轮询
 
 ## 开发环境
@@ -93,7 +94,7 @@ npm run tauri dev
 
 ## 回滚到当前稳定版
 
-仓库使用 Git 管理版本，当前稳定基线是 `v0.2.0`。请先保存或提交自己的改动，然后在仓库目录运行：
+仓库使用 Git 管理版本，当前稳定基线是 `v1.0.0`。请先保存或提交自己的改动，然后在仓库目录运行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\rollback-to-stable.ps1
@@ -159,6 +160,8 @@ src-tauri/src/
   tray.rs          系统托盘
   window/          悬浮窗和设置窗口生命周期
 core-tests/         受限 GNU 环境下复用核心源码测试的 harness
+scripts/            本地发布与安全回滚脚本
+docs/               发布检查清单与维护文档
 ```
 
 运行时数据使用 Tauri 标准应用目录：非敏感设置存为 `settings.json`，缓存存为 `translations.sqlite3`。API Key 不会写入这两个文件。
@@ -178,6 +181,7 @@ core-tests/         受限 GNU 环境下复用核心源码测试的 harness
 - 全局快捷键冲突时需要在设置中更换组合。
 - OCR 质量取决于 Windows 已安装语言包、截图清晰度和文字排版。
 - 悬浮窗高度为可调整的固定初始值，长原文或译文在窗口内部滚动。
+- 当前“检查更新”会定位并复制 GitHub Releases 下载页，不会绕过签名校验静默安装。
 
 ## Roadmap
 

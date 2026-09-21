@@ -25,6 +25,7 @@ pub struct AppState {
     pub settings: Arc<SettingsStore>,
     pub secrets: Arc<dyn SecretStore>,
     pub translation: Arc<TranslationService>,
+    pub http_client: reqwest::Client,
     pub cache_path: PathBuf,
     latest_request: AtomicU64,
     popup_pinned: AtomicBool,
@@ -62,7 +63,8 @@ impl AppState {
         Ok(Self {
             settings,
             secrets: Arc::new(KeyringSecretStore),
-            translation: Arc::new(TranslationService::new(client, cache)),
+            translation: Arc::new(TranslationService::new(client.clone(), cache)),
+            http_client: client,
             cache_path,
             latest_request: AtomicU64::new(0),
             popup_pinned: AtomicBool::new(false),

@@ -1,5 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppError, DiagnosticsView, SettingsView, UpdateSettings } from "../types";
+import type {
+  AppError,
+  DiagnosticsView,
+  SettingsBackup,
+  SettingsView,
+  UpdateInfo,
+  UpdateSettings,
+} from "../types";
 import "./settings.css";
 
 const root = document.querySelector<HTMLElement>("#app")!;
@@ -55,6 +62,21 @@ export function mountSettings(): void {
           <pre id="diagnostics">展开后读取诊断信息</pre>
           <button id="copy-diagnostics" type="button" class="secondary">复制诊断信息</button>
         </details>
+        <div class="maintenance-card">
+          <div>
+            <strong>应用更新</strong>
+            <p id="update-status">从 GitHub Releases 检查正式版本。</p>
+          </div>
+          <button id="check-update" type="button" class="secondary">检查更新</button>
+        </div>
+        <details class="backup-card">
+          <summary>设置备份与恢复（不包含 API Key）</summary>
+          <textarea id="settings-backup" rows="8" spellcheck="false" placeholder="导出的 JSON 会显示在这里；也可粘贴备份后载入表单。"></textarea>
+          <div class="backup-actions">
+            <button id="export-settings" type="button" class="secondary">导出并复制</button>
+            <button id="import-settings" type="button" class="secondary">载入到表单</button>
+          </div>
+        </details>
         <label class="checkbox-row"><input name="clearApiKey" type="checkbox" />删除已保存的 API Key</label>
         <p id="key-status" class="key-status"></p>
         <p id="status" class="status" role="status"></p>
@@ -88,6 +110,15 @@ export function mountSettings(): void {
   root
     .querySelector<HTMLButtonElement>("#copy-diagnostics")!
     .addEventListener("click", () => void copyDiagnostics());
+  root
+    .querySelector<HTMLButtonElement>("#check-update")!
+    .addEventListener("click", () => void checkUpdates());
+  root
+    .querySelector<HTMLButtonElement>("#export-settings")!
+    .addEventListener("click", () => void exportSettings());
+  root
+    .querySelector<HTMLButtonElement>("#import-settings")!
+    .addEventListener("click", () => void importSettings(form));
   void load(form);
 }
 
@@ -174,6 +205,63 @@ async function copyDiagnostics(): Promise<void> {
     const text = await loadDiagnostics();
     await invoke("copy_translation", { text });
     setStatus("诊断信息已复制（不包含 API Key）", "success");
+  } catch (error) {
+    setStatus(errorMessage(error), "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function checkUpdates(): Promise<void> {
+  const output = root.querySelector<HTMLElement>("#update-status")!;
+  setBusy(true);
+  output.textContent = "正在检查 GitHub Releases…";
+  try {
+    const update = await invoke<UpdateInfo>("check_for_updates");
+    if (update.updateAvailable) {
+      output.textContent = `发现 v${update.latestVersion}，下载页已复制。`;
+      await invoke("copy_translation", { text: update.releaseUrl });
+    } else {
+      output.textContent = `当前 v${update.currentVersion} 已是最新正式版。`;
+    }
+  } catch (error) {
+    output.textContent = errorMessage(error);
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function exportSettings(): Promise<void> {
+  setBusy(true);
+  try {
+    const backup = await invoke<string>("export_settings_backup");
+    root.querySelector<HTMLTextAreaElement>("#settings-backup")!.value = backup;
+    await invoke("copy_translation", { text: backup });
+    setStatus("设置备份已复制（不包含 API Key）", "success");
+  } catch (error) {
+    setStatus(errorMessage(error), "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function importSettings(form: HTMLFormElement): Promise<void> {
+  const contents = root.querySelector<HTMLTextAreaElement>("#settings-backup")!.value.trim();
+  if (!contents) {
+    setStatus("请先粘贴设置备份 JSON", "error");
+    return;
+  }
+  setBusy(true);
+  try {
+    const backup = await invoke<SettingsBackup>("import_settings_backup", { contents });
+    setInput(form, "provider", backup.provider);
+    setInput(form, "baseUrl", backup.baseUrl);
+    setInput(form, "model", backup.model);
+    setInput(form, "globalShortcut", backup.globalShortcut);
+    setInput(form, "ocrShortcut", backup.ocrShortcut);
+    setCheckbox(form, "autoStartEnabled", backup.autoStartEnabled);
+    refreshKeyStatus(form);
+    setStatus("备份已载入表单，请确认后点击保存", "success");
   } catch (error) {
     setStatus(errorMessage(error), "error");
   } finally {

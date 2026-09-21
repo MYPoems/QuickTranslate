@@ -13,6 +13,7 @@ mod storage;
 mod translation;
 #[cfg(not(test))]
 mod tray;
+mod update;
 #[cfg(not(test))]
 mod window;
 
@@ -99,6 +100,9 @@ pub fn run() {
             commands::settings::save_settings,
             commands::settings::test_provider,
             commands::settings::get_diagnostics,
+            commands::settings::check_for_updates,
+            commands::settings::export_settings_backup,
+            commands::settings::import_settings_backup,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run QuickTranslate");

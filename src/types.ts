@@ -72,3 +72,20 @@ export interface HistoryEntry {
   createdAt: number;
   favorite: boolean;
 }
+
+export interface SettingsBackup {
+  schemaVersion: number;
+  provider: string;
+  baseUrl: string;
+  model: string;
+  globalShortcut: string;
+  ocrShortcut: string;
+  autoStartEnabled: boolean;
+}
+
+export interface UpdateInfo {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  releaseUrl: string;
+}

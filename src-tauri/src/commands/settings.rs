@@ -5,7 +5,7 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::{
     app::{AppState, DiagnosticError},
-    config::{AppSettings, SettingsStore, SettingsView, UpdateSettings},
+    config::{AppSettings, SettingsStore, SettingsView, UpdateSettings, CURRENT_SETTINGS_SCHEMA},
     errors::AppError,
     security::provider_api_key,
 };
@@ -22,6 +22,18 @@ pub struct DiagnosticsView {
     settings_path: String,
     cache_path: String,
     last_error: Option<DiagnosticError>,
+}
+
+#[derive(Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsBackup {
+    schema_version: u32,
+    provider: String,
+    base_url: String,
+    model: String,
+    global_shortcut: String,
+    ocr_shortcut: String,
+    auto_start_enabled: bool,
 }
 
 #[tauri::command]
@@ -150,4 +162,58 @@ pub async fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsView, AppError
         cache_path: state.cache_path.display().to_string(),
         last_error: state.last_error(),
     })
+}
+
+#[tauri::command]
+pub fn export_settings_backup(app: AppHandle) -> Result<String, AppError> {
+    let state = app.state::<AppState>();
+    let settings = state.settings.get()?;
+    let backup = SettingsBackup {
+        schema_version: CURRENT_SETTINGS_SCHEMA,
+        provider: settings.provider,
+        base_url: settings.base_url,
+        model: settings.model,
+        global_shortcut: settings.global_shortcut,
+        ocr_shortcut: settings.ocr_shortcut,
+        auto_start_enabled: app
+            .autolaunch()
+            .is_enabled()
+            .map_err(|error| AppError::AutoStart(error.to_string()))?,
+    };
+    serde_json::to_string_pretty(&backup).map_err(|error| AppError::Settings(error.to_string()))
+}
+
+#[tauri::command]
+pub fn import_settings_backup(contents: String) -> Result<SettingsBackup, AppError> {
+    let backup: SettingsBackup = serde_json::from_str(&contents)
+        .map_err(|error| AppError::Settings(format!("备份 JSON 无效：{error}")))?;
+    if backup.schema_version > CURRENT_SETTINGS_SCHEMA {
+        return Err(AppError::Settings(
+            "该备份来自更高版本，当前版本无法导入".into(),
+        ));
+    }
+    let normalized = SettingsStore::validate(&UpdateSettings {
+        provider: backup.provider,
+        base_url: backup.base_url,
+        model: backup.model,
+        global_shortcut: backup.global_shortcut,
+        ocr_shortcut: backup.ocr_shortcut,
+        api_key: None,
+        clear_api_key: false,
+        auto_start_enabled: backup.auto_start_enabled,
+    })?;
+    Ok(SettingsBackup {
+        schema_version: CURRENT_SETTINGS_SCHEMA,
+        provider: normalized.provider,
+        base_url: normalized.base_url,
+        model: normalized.model,
+        global_shortcut: normalized.global_shortcut,
+        ocr_shortcut: normalized.ocr_shortcut,
+        auto_start_enabled: backup.auto_start_enabled,
+    })
+}
+
+#[tauri::command]
+pub async fn check_for_updates(app: AppHandle) -> Result<crate::update::UpdateInfo, AppError> {
+    crate::update::check_for_updates(&app.state::<AppState>().http_client).await
 }

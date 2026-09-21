@@ -11,9 +11,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::{errors::AppError, security::SecretStore};
 
+pub const CURRENT_SETTINGS_SCHEMA: u32 = 1;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
+    pub schema_version: u32,
     pub provider: String,
     pub base_url: String,
     pub model: String,
@@ -24,6 +27,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            schema_version: CURRENT_SETTINGS_SCHEMA,
             provider: "OpenAI Compatible".into(),
             base_url: "https://api.openai.com/v1".into(),
             model: "gpt-4.1-mini".into(),
@@ -76,7 +80,17 @@ pub struct SettingsStore {
 
 impl SettingsStore {
     pub fn load(path: PathBuf) -> Result<Self, AppError> {
-        let current = load_with_backup(&path)?;
+        let (mut current, source_schema) = load_with_backup(&path)?;
+        if source_schema < CURRENT_SETTINGS_SCHEMA {
+            if path.exists() {
+                fs::copy(&path, migration_backup_path(&path))
+                    .map_err(|error| AppError::Settings(error.to_string()))?;
+            }
+            current.schema_version = CURRENT_SETTINGS_SCHEMA;
+            let serialized = serde_json::to_vec_pretty(&current)
+                .map_err(|error| AppError::Settings(error.to_string()))?;
+            persist_atomically(&path, &serialized)?;
+        }
         Ok(Self {
             path,
             current: RwLock::new(current),
@@ -128,6 +142,7 @@ impl SettingsStore {
         }
 
         Ok(AppSettings {
+            schema_version: CURRENT_SETTINGS_SCHEMA,
             provider,
             base_url: validate_base_url(&update.base_url)?,
             model,
@@ -193,12 +208,25 @@ fn backup_path(path: &Path) -> PathBuf {
     path.with_extension("json.bak")
 }
 
-fn read_settings(path: &Path) -> Result<AppSettings, AppError> {
-    let bytes = fs::read(path).map_err(|error| AppError::Settings(error.to_string()))?;
-    serde_json::from_slice(&bytes).map_err(|error| AppError::Settings(error.to_string()))
+fn migration_backup_path(path: &Path) -> PathBuf {
+    path.with_extension("pre-v1.json")
 }
 
-fn load_with_backup(path: &Path) -> Result<AppSettings, AppError> {
+fn read_settings(path: &Path) -> Result<(AppSettings, u32), AppError> {
+    let bytes = fs::read(path).map_err(|error| AppError::Settings(error.to_string()))?;
+    let raw: serde_json::Value =
+        serde_json::from_slice(&bytes).map_err(|error| AppError::Settings(error.to_string()))?;
+    let source_schema = raw
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(0);
+    let settings =
+        serde_json::from_value(raw).map_err(|error| AppError::Settings(error.to_string()))?;
+    Ok((settings, source_schema))
+}
+
+fn load_with_backup(path: &Path) -> Result<(AppSettings, u32), AppError> {
     if path.exists() {
         match read_settings(path) {
             Ok(settings) => return Ok(settings),
@@ -221,7 +249,7 @@ fn load_with_backup(path: &Path) -> Result<AppSettings, AppError> {
         fs::copy(&backup, path).map_err(|error| AppError::Settings(error.to_string()))?;
         return Ok(settings);
     }
-    Ok(AppSettings::default())
+    Ok((AppSettings::default(), CURRENT_SETTINGS_SCHEMA))
 }
 
 fn persist_atomically(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
@@ -321,6 +349,7 @@ mod tests {
         }"#;
         let migrated: AppSettings = serde_json::from_str(legacy).unwrap();
         assert_eq!(migrated.ocr_shortcut, "Alt+W");
+        assert_eq!(migrated.schema_version, CURRENT_SETTINGS_SCHEMA);
 
         let mut duplicate = update("https://example.com/v1");
         duplicate.ocr_shortcut = duplicate.global_shortcut.clone();
@@ -344,6 +373,30 @@ mod tests {
             SettingsStore::load(path.clone()).unwrap().get().unwrap(),
             expected
         );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn upgrades_legacy_file_and_keeps_pre_v1_backup() {
+        let path = std::env::temp_dir().join(format!(
+            "quicktranslate-legacy-settings-{}-{}.json",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let legacy = r#"{
+          "provider": "OpenAI Compatible",
+          "baseUrl": "https://api.openai.com/v1",
+          "model": "gpt-4.1-mini",
+          "globalShortcut": "Alt+Q"
+        }"#;
+        fs::write(&path, legacy).unwrap();
+        let store = SettingsStore::load(path.clone()).unwrap();
+        assert_eq!(store.get().unwrap().schema_version, CURRENT_SETTINGS_SCHEMA);
+        assert!(migration_backup_path(&path).exists());
+        let _ = fs::remove_file(migration_backup_path(&path));
         let _ = fs::remove_file(path);
     }
 }

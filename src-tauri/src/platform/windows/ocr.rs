@@ -1,7 +1,8 @@
 use std::{ffi::c_void, ptr};
 
 use windows::{
-    core::Interface,
+    core::{Interface, HSTRING},
+    Globalization::Language,
     Graphics::Imaging::{BitmapPixelFormat, SoftwareBitmap},
     Media::Ocr::OcrEngine,
     Storage::Streams::Buffer,
@@ -15,27 +16,96 @@ use windows::{
     },
 };
 
-use crate::errors::AppError;
+use image::{codecs::png::PngEncoder, ExtendedColorType, ImageEncoder};
 
-pub fn capture_and_recognize(x: i32, y: i32, width: i32, height: i32) -> Result<String, AppError> {
+use crate::{config::OcrLanguage, errors::AppError};
+
+pub fn capture_and_recognize(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    language: OcrLanguage,
+) -> Result<String, AppError> {
     if width < 8 || height < 8 {
         return Err(AppError::Ocr("所选区域太小".into()));
     }
 
     unsafe { RoInitialize(RO_INIT_MULTITHREADED) }
         .map_err(|error| AppError::Ocr(format!("无法初始化 Windows OCR：{error}")))?;
-    let result = recognize_region(x, y, width, height);
+    let result = recognize_region(x, y, width, height, language);
     unsafe { RoUninitialize() };
     result
 }
 
-fn recognize_region(x: i32, y: i32, width: i32, height: i32) -> Result<String, AppError> {
+pub fn capture_png(x: i32, y: i32, width: i32, height: i32) -> Result<Vec<u8>, AppError> {
+    if width < 8 || height < 8 {
+        return Err(AppError::Ocr("所选区域太小".into()));
+    }
+    let mut pixels = capture_bgra(x, y, width, height, width, height)?;
+    for pixel in pixels.as_chunks_mut::<4>().0 {
+        pixel.swap(0, 2);
+        pixel[3] = 255;
+    }
+    let mut encoded = Vec::new();
+    PngEncoder::new(&mut encoded)
+        .write_image(
+            &pixels,
+            width as u32,
+            height as u32,
+            ExtendedColorType::Rgba8,
+        )
+        .map_err(|error| AppError::Ocr(format!("无法编码 OCR 截图：{error}")))?;
+    Ok(encoded)
+}
+
+fn recognize_region(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    language: OcrLanguage,
+) -> Result<String, AppError> {
     let max_dimension = OcrEngine::MaxImageDimension()
         .map_err(|error| AppError::Ocr(format!("无法读取 OCR 图像限制：{error}")))?
         .min(i32::MAX as u32) as i32;
-    let (output_width, output_height) = scaled_dimensions(width, height, max_dimension);
+    let (output_width, output_height) = ocr_dimensions(width, height, max_dimension);
     let pixels = capture_bgra(x, y, width, height, output_width, output_height)?;
+    let engine = create_engine(language)?;
+    let original = recognize_pixels(&engine, &pixels, output_width, output_height);
+    let enhanced_pixels = enhance_for_ocr(&pixels);
+    let enhanced = recognize_pixels(&engine, &enhanced_pixels, output_width, output_height);
 
+    match (original, enhanced) {
+        (Ok(original), Ok(enhanced)) => {
+            if text_quality_score(&enhanced) > text_quality_score(&original) {
+                Ok(enhanced)
+            } else {
+                Ok(original)
+            }
+        }
+        (Ok(text), Err(_)) | (Err(_), Ok(text)) => Ok(text),
+        (Err(error), Err(_)) => Err(error),
+    }
+}
+
+fn create_engine(language: OcrLanguage) -> Result<OcrEngine, AppError> {
+    match language {
+        OcrLanguage::Auto => OcrEngine::TryCreateFromUserProfileLanguages(),
+        OcrLanguage::Chinese => Language::CreateLanguage(&HSTRING::from("zh-Hans"))
+            .and_then(|language| OcrEngine::TryCreateFromLanguage(&language)),
+        OcrLanguage::English => Language::CreateLanguage(&HSTRING::from("en-US"))
+            .and_then(|language| OcrEngine::TryCreateFromLanguage(&language)),
+    }
+    .map_err(|error| AppError::Ocr(format!("请安装所选 OCR 语言包：{error}")))
+}
+
+fn recognize_pixels(
+    engine: &OcrEngine,
+    pixels: &[u8],
+    width: i32,
+    height: i32,
+) -> Result<String, AppError> {
     let byte_count =
         u32::try_from(pixels.len()).map_err(|_| AppError::Ocr("所选区域像素数据过大".into()))?;
     let buffer = Buffer::Create(byte_count)
@@ -50,16 +120,9 @@ fn recognize_region(x: i32, y: i32, width: i32, height: i32) -> Result<String, A
         .SetLength(byte_count)
         .map_err(|error| AppError::Ocr(format!("无法提交图像缓冲区：{error}")))?;
 
-    let bitmap = SoftwareBitmap::CreateCopyFromBuffer(
-        &buffer,
-        BitmapPixelFormat::Bgra8,
-        output_width,
-        output_height,
-    )
-    .map_err(|error| AppError::Ocr(format!("无法创建 OCR 图像：{error}")))?;
-    let engine = OcrEngine::TryCreateFromUserProfileLanguages().map_err(|error| {
-        AppError::Ocr(format!("请在 Windows 中安装中文或英文 OCR 语言包：{error}"))
-    })?;
+    let bitmap =
+        SoftwareBitmap::CreateCopyFromBuffer(&buffer, BitmapPixelFormat::Bgra8, width, height)
+            .map_err(|error| AppError::Ocr(format!("无法创建 OCR 图像：{error}")))?;
     let result = engine
         .RecognizeAsync(&bitmap)
         .and_then(|operation| operation.get())
@@ -75,12 +138,59 @@ fn recognize_region(x: i32, y: i32, width: i32, height: i32) -> Result<String, A
     Ok(text)
 }
 
-fn scaled_dimensions(width: i32, height: i32, max_dimension: i32) -> (i32, i32) {
-    let scale = (max_dimension as f64 / width.max(height) as f64).min(1.0);
+fn ocr_dimensions(width: i32, height: i32, max_dimension: i32) -> (i32, i32) {
+    let preferred_scale: f64 = if height <= 80 {
+        3.0
+    } else if height <= 180 {
+        2.0
+    } else {
+        1.0
+    };
+    let scale = preferred_scale.min(max_dimension as f64 / width.max(height) as f64);
     (
         ((width as f64 * scale).round() as i32).max(1),
         ((height as f64 * scale).round() as i32).max(1),
     )
+}
+
+fn enhance_for_ocr(pixels: &[u8]) -> Vec<u8> {
+    let luma = pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| {
+            (0.114 * pixel[0] as f32 + 0.587 * pixel[1] as f32 + 0.299 * pixel[2] as f32).round()
+                as u8
+        })
+        .collect::<Vec<_>>();
+    let (minimum, maximum) = luma
+        .iter()
+        .fold((u8::MAX, u8::MIN), |(minimum, maximum), value| {
+            (minimum.min(*value), maximum.max(*value))
+        });
+    let span = maximum.saturating_sub(minimum).max(32) as f32;
+    let mut enhanced = Vec::with_capacity(pixels.len());
+    for value in luma {
+        let normalized = (((value.saturating_sub(minimum)) as f32 / span) * 255.0)
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        enhanced.extend_from_slice(&[normalized, normalized, normalized, 255]);
+    }
+    enhanced
+}
+
+fn text_quality_score(text: &str) -> i64 {
+    text.chars().fold(0, |score, character| {
+        if character == '\u{fffd}' || character.is_control() && !character.is_whitespace() {
+            score - 12
+        } else if character.is_alphanumeric() || ('\u{3400}'..='\u{9fff}').contains(&character) {
+            score + 5
+        } else if character.is_whitespace() {
+            score
+        } else {
+            score + 1
+        }
+    })
 }
 
 fn capture_bgra(
@@ -178,11 +288,18 @@ fn capture_bgra(
 
 #[cfg(test)]
 mod tests {
-    use super::scaled_dimensions;
+    use super::{ocr_dimensions, text_quality_score};
 
     #[test]
-    fn keeps_small_regions_and_scales_large_regions_proportionally() {
-        assert_eq!(scaled_dimensions(800, 600, 2_600), (800, 600));
-        assert_eq!(scaled_dimensions(3_840, 2_160, 2_600), (2_600, 1_463));
+    fn upscales_text_strips_and_caps_large_regions() {
+        assert_eq!(ocr_dimensions(500, 60, 2_600), (1_500, 180));
+        assert_eq!(ocr_dimensions(800, 160, 2_600), (1_600, 320));
+        assert_eq!(ocr_dimensions(800, 600, 2_600), (800, 600));
+        assert_eq!(ocr_dimensions(3_840, 2_160, 2_600), (2_600, 1_463));
+    }
+
+    #[test]
+    fn prefers_meaningful_text_over_replacement_characters() {
+        assert!(text_quality_score("Hello 世界") > text_quality_score("He��o"));
     }
 }

@@ -13,7 +13,8 @@
 .inline-loading p { margin: 0; color: #71717a; font-size: 13px; }
 .recognized-section { margin: 0 0 13px; border-bottom: 1px solid #e4e4e7; padding: 0 0 12px; }
 .section-label { margin: 0 0 5px; color: #a1a1aa; font-size: 10px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
-.recognized-text { max-height: 150px; overflow-y: auto; margin: 0; color: #52525b; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+.recognized-text { box-sizing: border-box; width: 100%; max-height: 150px; resize: vertical; overflow-y: auto; margin: 0; border: 1px solid transparent; border-radius: 7px; padding: 5px 7px; background: transparent; color: #52525b; font: inherit; font-size: 13px; line-height: 1.55; white-space: pre-wrap; }
+.recognized-text:hover, .recognized-text:focus { border-color: #d4d4d8; outline: none; background: rgba(244,244,245,.7); }
 .ocr-content .translation { font-size: 16px; }
 .hint, .loading p { margin: 0; color: #71717a; font-size: 14px; }
 .spinner { width: 14px; height: 14px; border: 2px solid #d4d4d8; border-top-color: #27272a; border-radius: 50%; animation: spin 0.75s linear infinite; }
@@ -37,6 +38,7 @@
   .source, .hint, .loading p, .word-detail, .example { color: #a1a1aa; }
   .inline-loading p, .section-label, .recognized-text { color: #a1a1aa; }
   .recognized-section { border-color: #3f3f46; }
+  .recognized-text:hover, .recognized-text:focus { border-color: #52525b; background: rgba(39,39,42,.8); }
   .badge { background: #3f3f46; color: #d4d4d8; }
   .translation { color: #fafafa; }
   .definitions { color: #d4d4d8; }

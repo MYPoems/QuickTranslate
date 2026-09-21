@@ -11,7 +11,25 @@ use serde::{Deserialize, Serialize};
 
 use crate::{errors::AppError, security::SecretStore};
 
-pub const CURRENT_SETTINGS_SCHEMA: u32 = 1;
+pub const CURRENT_SETTINGS_SCHEMA: u32 = 2;
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum OcrEngineKind {
+    #[default]
+    Windows,
+    Paddle,
+    Cloud,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum OcrLanguage {
+    #[default]
+    Auto,
+    Chinese,
+    English,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
@@ -22,6 +40,10 @@ pub struct AppSettings {
     pub model: String,
     pub global_shortcut: String,
     pub ocr_shortcut: String,
+    pub ocr_engine: OcrEngineKind,
+    pub ocr_language: OcrLanguage,
+    pub cloud_ocr_base_url: String,
+    pub cloud_ocr_model: String,
 }
 
 impl Default for AppSettings {
@@ -33,6 +55,10 @@ impl Default for AppSettings {
             model: "gpt-4.1-mini".into(),
             global_shortcut: "Alt+Q".into(),
             ocr_shortcut: "Alt+W".into(),
+            ocr_engine: OcrEngineKind::Windows,
+            ocr_language: OcrLanguage::Auto,
+            cloud_ocr_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
+            cloud_ocr_model: "qwen3.5-ocr".into(),
         }
     }
 }
@@ -54,7 +80,13 @@ pub struct SettingsView {
     pub model: String,
     pub global_shortcut: String,
     pub ocr_shortcut: String,
+    pub ocr_engine: OcrEngineKind,
+    pub ocr_language: OcrLanguage,
+    pub cloud_ocr_base_url: String,
+    pub cloud_ocr_model: String,
     pub api_key_configured: bool,
+    pub cloud_ocr_api_key_configured: bool,
+    pub paddle_ocr_installed: bool,
     pub auto_start_enabled: bool,
 }
 
@@ -66,9 +98,16 @@ pub struct UpdateSettings {
     pub model: String,
     pub global_shortcut: String,
     pub ocr_shortcut: String,
+    pub ocr_engine: OcrEngineKind,
+    pub ocr_language: OcrLanguage,
+    pub cloud_ocr_base_url: String,
+    pub cloud_ocr_model: String,
     pub api_key: Option<String>,
     #[serde(default)]
     pub clear_api_key: bool,
+    pub cloud_ocr_api_key: Option<String>,
+    #[serde(default)]
+    pub clear_cloud_ocr_api_key: bool,
     #[serde(default)]
     pub auto_start_enabled: bool,
 }
@@ -83,7 +122,7 @@ impl SettingsStore {
         let (mut current, source_schema) = load_with_backup(&path)?;
         if source_schema < CURRENT_SETTINGS_SCHEMA {
             if path.exists() {
-                fs::copy(&path, migration_backup_path(&path))
+                fs::copy(&path, migration_backup_path(&path, source_schema))
                     .map_err(|error| AppError::Settings(error.to_string()))?;
             }
             current.schema_version = CURRENT_SETTINGS_SCHEMA;
@@ -112,6 +151,7 @@ impl SettingsStore {
         &self,
         secrets: &dyn SecretStore,
         auto_start_enabled: bool,
+        paddle_ocr_installed: bool,
     ) -> Result<SettingsView, AppError> {
         let settings = self.get()?;
         Ok(SettingsView {
@@ -120,7 +160,13 @@ impl SettingsStore {
             model: settings.model,
             global_shortcut: settings.global_shortcut,
             ocr_shortcut: settings.ocr_shortcut,
+            ocr_engine: settings.ocr_engine,
+            ocr_language: settings.ocr_language,
+            cloud_ocr_base_url: settings.cloud_ocr_base_url,
+            cloud_ocr_model: settings.cloud_ocr_model,
             api_key_configured: secrets.get_api_key()?.is_some(),
+            cloud_ocr_api_key_configured: secrets.get_cloud_ocr_api_key()?.is_some(),
+            paddle_ocr_installed,
             auto_start_enabled,
         })
     }
@@ -130,6 +176,8 @@ impl SettingsStore {
         let model = update.model.trim().to_string();
         let global_shortcut = update.global_shortcut.trim().to_string();
         let ocr_shortcut = update.ocr_shortcut.trim().to_string();
+        let cloud_ocr_model = update.cloud_ocr_model.trim().to_string();
+        let cloud_ocr_base_url = update.cloud_ocr_base_url.trim();
         if provider.is_empty()
             || model.is_empty()
             || global_shortcut.is_empty()
@@ -140,6 +188,18 @@ impl SettingsStore {
         if global_shortcut.eq_ignore_ascii_case(&ocr_shortcut) {
             return Err(AppError::Settings("划词翻译与 OCR 快捷键不能相同".into()));
         }
+        if update.ocr_engine == OcrEngineKind::Cloud
+            && (cloud_ocr_base_url.is_empty() || cloud_ocr_model.is_empty())
+        {
+            return Err(AppError::Settings(
+                "云端视觉 OCR 需要 Base URL 和模型名称".into(),
+            ));
+        }
+        let cloud_ocr_base_url = if cloud_ocr_base_url.is_empty() {
+            String::new()
+        } else {
+            validate_base_url(cloud_ocr_base_url)?
+        };
 
         Ok(AppSettings {
             schema_version: CURRENT_SETTINGS_SCHEMA,
@@ -148,6 +208,10 @@ impl SettingsStore {
             model,
             global_shortcut,
             ocr_shortcut,
+            ocr_engine: update.ocr_engine,
+            ocr_language: update.ocr_language,
+            cloud_ocr_base_url,
+            cloud_ocr_model,
         })
     }
 
@@ -208,8 +272,8 @@ fn backup_path(path: &Path) -> PathBuf {
     path.with_extension("json.bak")
 }
 
-fn migration_backup_path(path: &Path) -> PathBuf {
-    path.with_extension("pre-v1.json")
+fn migration_backup_path(path: &Path, source_schema: u32) -> PathBuf {
+    path.with_extension(format!("pre-v{source_schema}.json"))
 }
 
 fn read_settings(path: &Path) -> Result<(AppSettings, u32), AppError> {
@@ -310,8 +374,14 @@ mod tests {
             model: "test-model".into(),
             global_shortcut: "Alt+Q".into(),
             ocr_shortcut: "Alt+W".into(),
+            ocr_engine: OcrEngineKind::Windows,
+            ocr_language: OcrLanguage::Auto,
+            cloud_ocr_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
+            cloud_ocr_model: "qwen3.5-ocr".into(),
             api_key: None,
             clear_api_key: false,
+            cloud_ocr_api_key: None,
+            clear_cloud_ocr_api_key: false,
             auto_start_enabled: false,
         }
     }
@@ -349,6 +419,9 @@ mod tests {
         }"#;
         let migrated: AppSettings = serde_json::from_str(legacy).unwrap();
         assert_eq!(migrated.ocr_shortcut, "Alt+W");
+        assert_eq!(migrated.ocr_engine, OcrEngineKind::Windows);
+        assert_eq!(migrated.ocr_language, OcrLanguage::Auto);
+        assert_eq!(migrated.cloud_ocr_model, "qwen3.5-ocr");
         assert_eq!(migrated.schema_version, CURRENT_SETTINGS_SCHEMA);
 
         let mut duplicate = update("https://example.com/v1");
@@ -377,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn upgrades_legacy_file_and_keeps_pre_v1_backup() {
+    fn upgrades_legacy_file_and_keeps_versioned_backup() {
         let path = std::env::temp_dir().join(format!(
             "quicktranslate-legacy-settings-{}-{}.json",
             std::process::id(),
@@ -395,8 +468,8 @@ mod tests {
         fs::write(&path, legacy).unwrap();
         let store = SettingsStore::load(path.clone()).unwrap();
         assert_eq!(store.get().unwrap().schema_version, CURRENT_SETTINGS_SCHEMA);
-        assert!(migration_backup_path(&path).exists());
-        let _ = fs::remove_file(migration_backup_path(&path));
+        assert!(migration_backup_path(&path, 0).exists());
+        let _ = fs::remove_file(migration_backup_path(&path, 0));
         let _ = fs::remove_file(path);
     }
 }

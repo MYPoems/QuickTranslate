@@ -6,6 +6,7 @@ mod app;
 mod commands;
 mod config;
 mod errors;
+mod ocr;
 mod platform;
 mod providers;
 mod security;
@@ -94,6 +95,11 @@ pub fn run() {
             commands::translation::get_popup_pinned,
             commands::translation::set_popup_pinned,
             commands::ocr::recognize_ocr_region,
+            commands::ocr::complete_paddle_ocr,
+            commands::ocr::fail_paddle_ocr,
+            commands::ocr::get_paddle_ocr_plugin_status,
+            commands::ocr::install_paddle_ocr_plugin,
+            commands::ocr::uninstall_paddle_ocr_plugin,
             commands::ocr::hide_ocr_window,
             commands::translation::hide_translation_window,
             commands::settings::get_settings,

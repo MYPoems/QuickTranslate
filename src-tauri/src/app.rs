@@ -27,6 +27,7 @@ pub struct AppState {
     pub translation: Arc<TranslationService>,
     pub http_client: reqwest::Client,
     pub cache_path: PathBuf,
+    pub ocr_plugin_dir: PathBuf,
     latest_request: AtomicU64,
     popup_pinned: AtomicBool,
     active_request: Mutex<CancellationToken>,
@@ -52,6 +53,7 @@ impl AppState {
             .map_err(|error| AppError::Database(error.to_string()))?;
         let settings = Arc::new(SettingsStore::load(config_dir.join("settings.json"))?);
         let cache_path = data_dir.join("translations.sqlite3");
+        let ocr_plugin_dir = crate::ocr::plugin::plugin_dir(&data_dir);
         let cache = Arc::new(TranslationCache::open(&cache_path)?);
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
@@ -66,6 +68,7 @@ impl AppState {
             translation: Arc::new(TranslationService::new(client.clone(), cache)),
             http_client: client,
             cache_path,
+            ocr_plugin_dir,
             latest_request: AtomicU64::new(0),
             popup_pinned: AtomicBool::new(false),
             active_request: Mutex::new(CancellationToken::new()),
@@ -83,7 +86,7 @@ impl AppState {
         (request_id, next)
     }
 
-    fn is_latest(&self, request_id: u64) -> bool {
+    pub(crate) fn is_latest(&self, request_id: u64) -> bool {
         self.latest_request.load(Ordering::Relaxed) == request_id
     }
 
@@ -156,6 +159,39 @@ pub fn trigger_ocr_translation(app: AppHandle, recognized_text: String) -> u64 {
         "ocr",
     ));
     request_id
+}
+
+pub fn begin_ocr_recognition(app: &AppHandle) -> u64 {
+    let (request_id, _) = app.state::<AppState>().begin_request();
+    window::prepare_ocr_popup(app);
+    window::show_popup(app);
+    let _ = app.emit_to(
+        "popup",
+        "translation-state",
+        PopupPayload {
+            request_id,
+            status: "loading",
+            source_text: None,
+            source_kind: Some("ocr"),
+            result: None,
+            error: None,
+        },
+    );
+    request_id
+}
+
+pub fn finish_ocr_translation(app: AppHandle, request_id: u64, recognized_text: String) -> u64 {
+    if !app.state::<AppState>().is_latest(request_id) {
+        return request_id;
+    }
+    trigger_ocr_translation(app, recognized_text)
+}
+
+pub fn finish_ocr_error(app: &AppHandle, request_id: u64, error: AppError) -> u64 {
+    if !app.state::<AppState>().is_latest(request_id) {
+        return request_id;
+    }
+    show_ocr_error(app, error)
 }
 
 pub fn show_ocr_error(app: &AppHandle, error: AppError) -> u64 {

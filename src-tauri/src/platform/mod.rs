@@ -2,7 +2,7 @@ mod placement;
 #[cfg(windows)]
 mod windows;
 
-use crate::errors::AppError;
+use crate::{config::OcrLanguage, errors::AppError};
 
 pub use placement::{place_popup, PopupPlacement, WorkArea};
 
@@ -65,10 +65,28 @@ pub fn recognize_screen_region(
     y: i32,
     width: i32,
     height: i32,
+    language: OcrLanguage,
 ) -> Result<String, AppError> {
     #[cfg(windows)]
     {
-        windows::ocr::capture_and_recognize(x, y, width, height)
+        windows::ocr::capture_and_recognize(x, y, width, height, language)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (x, y, width, height, language);
+        Err(AppError::UnsupportedPlatform)
+    }
+}
+
+pub fn capture_screen_region_png(
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<Vec<u8>, AppError> {
+    #[cfg(windows)]
+    {
+        windows::ocr::capture_png(x, y, width, height)
     }
     #[cfg(not(windows))]
     {

@@ -1,6 +1,6 @@
 # QuickTranslate
 
-QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 OCR 翻译工具。它常驻系统托盘：选中文字后按 `Alt + Q` 可划词翻译，按 `Alt + W` 可框选屏幕区域并用 Windows 本地 OCR 识别后翻译。
+QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 OCR 翻译工具。它常驻系统托盘：选中文字后按 `Alt + Q` 可划词翻译，按 `Alt + W` 可框选屏幕区域并识别后翻译。OCR 默认使用 Windows 内置能力，也可切换到可选的 PP-OCRv6 Small 本地插件或自备 API Key 的云端视觉模型。
 
 > 截图占位：`docs/screenshots/popup.png`、`docs/screenshots/settings.png`
 
@@ -11,7 +11,7 @@ QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 O
 ```powershell
 $installer = Join-Path $env:TEMP "QuickTranslate_1.0.0_x64-setup.exe"
 Invoke-WebRequest "https://github.com/MYPoems/QuickTranslate/releases/download/v1.0.0/QuickTranslate_1.0.0_x64-setup.exe" -OutFile $installer
-if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "4CE6A17E57A22036001AE3B5A0D3C0739B359F65A1EDBD26F18A50FE377714E7") { Remove-Item $installer -Force; throw "安装包校验失败，请勿运行" }
+if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "528FF9D61F3FD662EAC8229E0DB38E493430211B072D6BB17FF2185591395255") { Remove-Item $installer -Force; throw "安装包校验失败，请勿运行" }
 Start-Process $installer -Wait
 Remove-Item $installer -Force
 ```
@@ -22,7 +22,10 @@ Remove-Item $installer -Force
 
 - 系统托盘：翻译、设置、退出
 - 可修改的全局快捷键（默认 `Alt + Q`）
-- 独立 OCR 快捷键（默认 `Alt + W`），框选屏幕文字后本地识别
+- 独立 OCR 快捷键（默认 `Alt + W`），支持 Windows OCR、PP-OCRv6 Small 和云端视觉 OCR 三种方案
+- Windows OCR 默认启用：无需额外下载，并自动放大小字、比较原图与增强图的识别结果
+- PP-OCRv6 Small 为可选本地插件：设置页一键下载/卸载约 29.8 MiB 官方模型，并在启用前校验固定大小和 SHA-256
+- 云端视觉 OCR 为可选 BYOK 配置：独立 Base URL、模型和 API Key，不与翻译 API Key 混用
 - Windows 临时 `Ctrl + C` 选词，并尽可能恢复原剪贴板全部格式
 - 完全本地的中英文检测和文本清洗（最多 5000 字符）
 - OpenAI-compatible Provider（OpenAI、阿里云百炼、DeepSeek 与自定义端点预设）
@@ -114,7 +117,23 @@ git switch main
 4. 按需勾选“开机自动启动”。
 5. 点击“测试连接”，成功后保存。
 
-然后在 Notepad、Edge/Chrome 或 VS Code 中选中文字，按 `Alt + Q`。对于图片、视频或无法复制的界面，按 `Alt + W` 后拖动框选文字区域；如 OCR 不可用，请在 Windows“语言和区域”中安装中文或英文语言包。
+然后在 Notepad、Edge/Chrome 或 VS Code 中选中文字，按 `Alt + Q`。对于图片、视频或无法复制的界面，按 `Alt + W` 后拖动框选文字区域。
+
+### OCR 方案
+
+| 方案 | 是否联网 | 配置方式 | 适合场景 |
+| --- | --- | --- | --- |
+| Windows OCR（默认） | 否 | 无需安装；可选择自动、简体中文或英文 | 日常文字、追求最轻量 |
+| PP-OCRv6 Small | 否 | 在设置页选择后点击“一键安装” | 小字、复杂排版、希望图片留在本机 |
+| 云端视觉 OCR | 是 | 用户自行填写 Base URL、模型和独立 API Key | 对准确率要求最高、可接受上传所选截图 |
+
+云端方案推荐阿里云百炼 `qwen3.5-ocr`：
+
+- Base URL：`https://dashscope.aliyuncs.com/compatible-mode/v1`
+- Model：`qwen3.5-ocr`
+- API Key：[前往阿里云百炼控制台申请](https://bailian.console.aliyun.com/?tab=model#/api-key)
+
+云端 OCR 配置完全可选。只有明确选择“云端视觉 OCR”并按 `Alt + W` 框选后，所选截图才会发送到用户配置的服务商；Cloud OCR API Key 单独保存在 Windows Credential Manager。Windows OCR 若提示语言不可用，请在 Windows“语言和区域”中安装对应语言包。
 
 ## 检查与构建
 
@@ -152,6 +171,7 @@ src-tauri/src/
   app.rs           应用状态、翻译触发与并发防护
   commands/        Tauri Commands
   config/          非敏感 JSON 设置
+  ocr/             云端 OCR 与 PP-OCRv6 Small 插件下载、校验和生命周期
   platform/windows Windows 剪贴板、选词、光标定位、截图和本地 OCR
   providers/       OpenAI-compatible Provider
   security/        Windows Credential Manager 抽象
@@ -169,7 +189,9 @@ docs/               发布检查清单与维护文档
 ## 安全与隐私
 
 - 选中文字只会发送给用户配置的 API Provider。
-- OCR 截图只在本机内存中交给 Windows OCR，不保存图片；识别后的文字会发送给用户配置的 Provider。
+- Windows OCR 与 PP-OCRv6 Small 的截图只在本机内存中处理且不落盘；识别后的文字会发送给用户配置的翻译 Provider。
+- 只有用户主动选择云端视觉 OCR 时，所选截图才会发送到其配置的云端 OCR 服务；云端 OCR Key 与翻译 Key 分开保存。
+- PP-OCRv6 Small 只从 PaddleOCR 官方模型地址下载，安装前校验文件大小和固定 SHA-256；模型可在设置页一键卸载。
 - Release 构建不记录 API Key、Authorization Header 或翻译原文。
 - Windows 选词使用 OLE clipboard data object 尝试恢复原始剪贴板格式；如果原应用不再提供延迟渲染数据，恢复仍可能失败。
 - 远程 Provider 强制使用 HTTPS；HTTP 仅允许本机回环地址上的 Ollama/LM Studio 等服务。
@@ -179,7 +201,9 @@ docs/               发布检查清单与维护文档
 - 第一版只在 Windows 实现选区读取；macOS/Linux 已保留平台模块边界，但会返回“不支持”。
 - 某些管理员权限应用、受保护输入框、游戏或禁用复制的控件无法通过 `Ctrl + C` 读取。
 - 全局快捷键冲突时需要在设置中更换组合。
-- OCR 质量取决于 Windows 已安装语言包、截图清晰度和文字排版。
+- Windows OCR 质量取决于已安装语言包、截图清晰度和文字排版；复杂图片可切换 PP-OCRv6 Small 或云端视觉 OCR。
+- PP-OCRv6 Small 首次启用需要下载约 29.8 MiB 模型，首次推理还需初始化本地 WebAssembly 运行时，因此会比后续识别慢。
+- 云端视觉 OCR 的可用性、费用、数据处理和限额由用户选择的服务商决定。
 - 悬浮窗高度为可调整的固定初始值，长原文或译文在窗口内部滚动。
 - 当前“检查更新”会定位并复制 GitHub Releases 下载页，不会绕过签名校验静默安装。
 
@@ -187,4 +211,4 @@ docs/               发布检查清单与维护文档
 
 1. macOS Accessibility / Linux selection clipboard 平台实现。
 2. 自动更新、设置迁移备份与发布签名。
-3. 可选的本地模型下载与生命周期管理。
+3. PP-OCRv6 Small 性能基准、更多语言模型及断点续传。

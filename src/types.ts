@@ -1,4 +1,6 @@
 export type Language = "chinese" | "english";
+export type OcrEngineKind = "windows" | "paddle" | "cloud";
+export type OcrLanguage = "auto" | "chinese" | "english";
 
 export interface TranslationResult {
   sourceText: string;
@@ -34,7 +36,13 @@ export interface SettingsView {
   model: string;
   globalShortcut: string;
   ocrShortcut: string;
+  ocrEngine: OcrEngineKind;
+  ocrLanguage: OcrLanguage;
+  cloudOcrBaseUrl: string;
+  cloudOcrModel: string;
   apiKeyConfigured: boolean;
+  cloudOcrApiKeyConfigured: boolean;
+  paddleOcrInstalled: boolean;
   autoStartEnabled: boolean;
 }
 
@@ -44,8 +52,14 @@ export interface UpdateSettings {
   model: string;
   globalShortcut: string;
   ocrShortcut: string;
+  ocrEngine: OcrEngineKind;
+  ocrLanguage: OcrLanguage;
+  cloudOcrBaseUrl: string;
+  cloudOcrModel: string;
   apiKey?: string;
   clearApiKey: boolean;
+  cloudOcrApiKey?: string;
+  clearCloudOcrApiKey: boolean;
   autoStartEnabled: boolean;
 }
 
@@ -54,7 +68,12 @@ export interface DiagnosticsView {
   provider: string;
   baseUrl: string;
   model: string;
+  ocrEngine: OcrEngineKind;
+  ocrLanguage: OcrLanguage;
   apiKeyConfigured: boolean;
+  cloudOcrModel: string;
+  cloudOcrApiKeyConfigured: boolean;
+  paddleOcrInstalled: boolean;
   cacheEntries: number;
   settingsPath: string;
   cachePath: string;
@@ -80,8 +99,29 @@ export interface SettingsBackup {
   model: string;
   globalShortcut: string;
   ocrShortcut: string;
+  ocrEngine: OcrEngineKind;
+  ocrLanguage: OcrLanguage;
+  cloudOcrBaseUrl: string;
+  cloudOcrModel: string;
   autoStartEnabled: boolean;
 }
+
+export interface PaddleOcrPluginStatus {
+  installed: boolean;
+  version: string;
+  installedBytes: number;
+  downloadBytes: number;
+}
+
+export type OcrRegionResult =
+  | { kind: "completed"; requestId: number }
+  | {
+      kind: "paddle";
+      requestId: number;
+      imageDataUrl: string;
+      detectionModelPath: string;
+      recognitionModelPath: string;
+    };
 
 export interface UpdateInfo {
   currentVersion: string;

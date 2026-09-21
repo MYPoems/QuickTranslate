@@ -81,10 +81,10 @@ function render(event: TranslationEvent): void {
     if (currentSourceKind === "ocr") {
       content.className = "content ocr-content";
       content.replaceChildren();
-      appendOcrSource(content, currentSource);
+      if (currentSource) appendOcrSource(content, currentSource);
       const loading = document.createElement("div");
       loading.className = "inline-loading";
-      loading.innerHTML = `<div class="spinner" aria-hidden="true"></div><p>正在翻译识别文字…</p>`;
+      loading.innerHTML = `<div class="spinner" aria-hidden="true"></div><p>${currentSource ? "正在翻译识别文字…" : "正在识别图片文字…"}</p>`;
       content.append(loading);
     } else {
       content.className = "content loading";
@@ -93,7 +93,7 @@ function render(event: TranslationEvent): void {
     copy.disabled = true;
     copySource.disabled = !currentSource;
     retranslateButton.disabled = true;
-    meta.textContent = "正在请求翻译服务";
+    meta.textContent = currentSourceKind === "ocr" && !currentSource ? "正在运行 OCR" : "正在请求翻译服务";
     badge.hidden = true;
     return;
   }
@@ -179,9 +179,16 @@ function appendOcrSource(content: HTMLElement, text: string): void {
   const label = document.createElement("p");
   label.className = "section-label";
   label.textContent = "识别文字";
-  const source = document.createElement("p");
+  const source = document.createElement("textarea");
   source.className = "recognized-text";
-  source.textContent = text;
+  source.value = text;
+  source.rows = Math.min(6, Math.max(2, text.split("\n").length));
+  source.setAttribute("aria-label", "OCR 识别文字，可编辑后重新翻译");
+  source.addEventListener("input", () => {
+    currentSource = source.value;
+    root.querySelector<HTMLButtonElement>("#copy-source")!.disabled = !currentSource.trim();
+    root.querySelector<HTMLButtonElement>("#retranslate")!.disabled = !currentSource.trim();
+  });
   section.append(label, source);
   content.append(section);
 }

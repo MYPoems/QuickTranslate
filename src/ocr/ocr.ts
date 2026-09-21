@@ -1,5 +1,7 @@
-import { invoke } from "@tauri-apps/api/core";
+import { PaddleOCR } from "@paddleocr/paddleocr-js";
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import type { OcrRegionResult } from "../types";
 import "./ocr.css";
 
 const root = document.querySelector<HTMLElement>("#app")!;
@@ -7,6 +9,8 @@ let startX = 0;
 let startY = 0;
 let dragging = false;
 let submitting = false;
+let paddleOcr: Promise<Awaited<ReturnType<typeof PaddleOCR.create>>> | undefined;
+let paddleModelKey = "";
 
 export function mountOcr(): void {
   root.innerHTML = `
@@ -61,11 +65,62 @@ function finishSelection(event: PointerEvent): void {
   submitting = true;
   root.querySelector<HTMLElement>(".ocr-instructions")!.hidden = true;
   root.querySelector<HTMLElement>("#ocr-status")!.hidden = false;
-  void invoke("recognize_ocr_region", { region: { x: left, y: top, width, height } }).finally(
-    () => {
-      submitting = false;
-    },
-  );
+  void recognize({ x: left, y: top, width, height }).finally(() => {
+    submitting = false;
+  });
+}
+
+async function recognize(region: {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}): Promise<void> {
+  const result = await invoke<OcrRegionResult>("recognize_ocr_region", { region });
+  if (result.kind !== "paddle") return;
+
+  try {
+    const engine = await getPaddleEngine(
+      result.detectionModelPath,
+      result.recognitionModelPath,
+    );
+    const response = await fetch(result.imageDataUrl);
+    const image = await response.blob();
+    const [prediction] = await engine.predict(image, { textRecScoreThresh: 0.35 });
+    const text = prediction.items
+      .filter((item) => item.score >= 0.35 && item.text.trim())
+      .map((item) => item.text.trim())
+      .join("\n");
+    await invoke("complete_paddle_ocr", { requestId: result.requestId, text });
+  } catch (error) {
+    await invoke("fail_paddle_ocr", {
+      requestId: result.requestId,
+      message: error instanceof Error ? error.message : "本地模型初始化失败",
+    });
+  }
+}
+
+function getPaddleEngine(
+  detectionModelPath: string,
+  recognitionModelPath: string,
+): Promise<Awaited<ReturnType<typeof PaddleOCR.create>>> {
+  const key = `${detectionModelPath}\n${recognitionModelPath}`;
+  if (!paddleOcr || paddleModelKey !== key) {
+    paddleModelKey = key;
+    paddleOcr = PaddleOCR.create({
+      textDetectionModelName: "PP-OCRv6_small_det",
+      textDetectionModelAsset: { url: convertFileSrc(detectionModelPath) },
+      textRecognitionModelName: "PP-OCRv6_small_rec",
+      textRecognitionModelAsset: { url: convertFileSrc(recognitionModelPath) },
+      textRecognitionBatchSize: 6,
+      ortOptions: {
+        backend: "wasm",
+        numThreads: 1,
+        simd: true,
+      },
+    });
+  }
+  return paddleOcr;
 }
 
 function cancelSelection(): void {

@@ -11,6 +11,16 @@ input:focus, select:focus { border-color: #71717a; box-shadow: 0 0 0 3px rgba(11
 input[readonly] { background: #e4e4e7; color: #52525b; }
 .checkbox-row { display: flex; align-items: center; gap: 8px; font-weight: 400; }
 .checkbox-row input { width: 15px; height: 15px; margin: 0; }
+.ocr-card { display: grid; gap: 13px; padding: 14px; border: 1px solid #d4d4d8; border-radius: 10px; background: #fff; }
+.ocr-card strong { color: #27272a; font-size: 14px; }
+.ocr-card > div:first-child > p, .ocr-options p { margin: 5px 0 0; color: #71717a; font-size: 12px; line-height: 1.5; }
+.ocr-options { display: grid; gap: 12px; padding: 12px; border-radius: 8px; background: #f4f4f5; }
+.ocr-options[hidden] { display: none; }
+.plugin-row, .cloud-help { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.plugin-row > div, .cloud-help > span { min-width: 0; }
+.plugin-row button, .cloud-help button { flex: none; border-radius: 8px; padding: 8px 11px; font-size: 12px; font-weight: 600; }
+.cloud-help { color: #52525b; font-size: 12px; }
+.privacy-warning { padding: 9px 10px; border-left: 3px solid #d97706; border-radius: 4px; background: #fffbeb; color: #92400e !important; }
 .preference-card { padding: 12px 13px; border: 1px solid #d4d4d8; border-radius: 9px; background: #fff; }
 .preference-card p { margin: 6px 0 0 23px; color: #71717a; font-size: 12px; line-height: 1.45; }
 .maintenance-card { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 13px; border: 1px solid #d4d4d8; border-radius: 9px; background: #fff; }
@@ -40,6 +50,12 @@ input[readonly] { background: #e4e4e7; color: #52525b; }
   label { color: #d4d4d8; }
   input, select { border-color: #52525b; background: #27272a; color: #fafafa; }
   input[readonly] { background: #3f3f46; color: #d4d4d8; }
+  .ocr-card { border-color: #52525b; background: #27272a; }
+  .ocr-card strong { color: #e4e4e7; }
+  .ocr-card > div:first-child > p, .ocr-options p { color: #a1a1aa; }
+  .ocr-options { background: #18181b; }
+  .cloud-help { color: #a1a1aa; }
+  .privacy-warning { border-left-color: #f59e0b; background: #422006; color: #fde68a !important; }
   .preference-card { border-color: #52525b; background: #27272a; }
   .preference-card p { color: #a1a1aa; }
   .maintenance-card { border-color: #52525b; background: #27272a; }
@@ -55,4 +71,10 @@ input[readonly] { background: #e4e4e7; color: #52525b; }
   .primary { border-color: #fafafa; background: #fafafa; color: #18181b; }
   .status[data-kind="success"] { color: #86efac; }
   .status[data-kind="error"] { color: #fca5a5; }
+}
+
+@media (max-width: 520px) {
+  .settings-shell { padding: 24px 18px 30px; }
+  .plugin-row, .cloud-help { align-items: stretch; flex-direction: column; }
+  .plugin-row button, .cloud-help button { width: 100%; }
 }

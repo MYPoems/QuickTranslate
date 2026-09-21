@@ -1,5 +1,6 @@
 mod settings;
 
 pub use settings::{
-    AppSettings, SettingsStore, SettingsView, UpdateSettings, CURRENT_SETTINGS_SCHEMA,
+    AppSettings, OcrEngineKind, OcrLanguage, SettingsStore, SettingsView, UpdateSettings,
+    CURRENT_SETTINGS_SCHEMA,
 };

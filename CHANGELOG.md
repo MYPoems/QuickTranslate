@@ -2,7 +2,12 @@
 
 ## 1.0.0 - 2026-09-21
 
-- 设置文件增加显式 Schema 版本，旧配置首次升级时保留 `settings.pre-v1.json` 备份。
+- OCR 扩展为三种可选方案：默认 Windows OCR、可一键安装的 PP-OCRv6 Small 本地插件，以及自备 API Key 的云端视觉 OCR。
+- Windows OCR 增加小字自动放大、灰度对比度增强双路识别和显式语言选择。
+- PP-OCRv6 Small 模型从 PaddleOCR 官方地址下载，安装前校验文件大小与 SHA-256，并支持一键卸载。
+- 云端 OCR 推荐阿里云百炼 `qwen3.5-ocr`，使用独立 Base URL、模型和 Windows 凭据，不与翻译 API Key 混用。
+- OCR 原文可在悬浮窗直接修正后重新翻译。
+- 设置文件增加显式 Schema 版本，旧配置首次升级时保留对应源版本的迁移备份。
 - 设置页支持导出、复制和校验恢复不含 API Key 的 JSON 备份。
 - 新增 GitHub Releases 正式版本检查；发现新版本时自动复制可信下载页地址。
 - 新增可手动触发或由版本标签触发的 Windows 正式安装包构建流水线。

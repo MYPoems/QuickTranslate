@@ -44,7 +44,7 @@ pub fn run() {
                             .and_then(|settings| settings.ocr_shortcut.parse::<Shortcut>().ok())
                             .is_some_and(|configured| configured == *shortcut);
                         if is_ocr {
-                            window::show_ocr_overlay(app);
+                            window::toggle_ocr_overlay(app);
                         } else {
                             trigger_selected_translation(app.clone());
                         }
@@ -80,6 +80,9 @@ pub fn run() {
                     && !window.app_handle().state::<AppState>().popup_pinned() =>
             {
                 let _ = window.hide();
+            }
+            tauri::WindowEvent::Focused(focused) if window.label() == "ocr" => {
+                window::handle_ocr_focus_change(window, *focused);
             }
             _ => {}
         })

@@ -1,6 +1,12 @@
-use tauri::{AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use tauri::{
+    AppHandle, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder, Window,
+};
 
 use crate::platform;
+
+static OCR_OVERLAY_HAS_FOCUS: AtomicBool = AtomicBool::new(false);
 
 pub fn show_popup(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("popup") {
@@ -60,7 +66,14 @@ pub fn show_history(app: &AppHandle) {
         .build();
 }
 
-pub fn show_ocr_overlay(app: &AppHandle) {
+pub fn toggle_ocr_overlay(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("ocr") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.hide();
+            return;
+        }
+    }
+
     let Some(bounds) = platform::ocr_monitor_bounds() else {
         return;
     };
@@ -90,6 +103,15 @@ pub fn show_ocr_overlay(app: &AppHandle) {
     };
     let _ = window.set_position(PhysicalPosition::new(bounds.left, bounds.top));
     let _ = window.set_size(PhysicalSize::new(bounds.width, bounds.height));
+    OCR_OVERLAY_HAS_FOCUS.store(false, Ordering::Relaxed);
     let _ = window.show();
     let _ = window.set_focus();
+}
+
+pub fn handle_ocr_focus_change(window: &Window, focused: bool) {
+    if focused {
+        OCR_OVERLAY_HAS_FOCUS.store(true, Ordering::Relaxed);
+    } else if OCR_OVERLAY_HAS_FOCUS.swap(false, Ordering::Relaxed) {
+        let _ = window.hide();
+    }
 }

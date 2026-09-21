@@ -11,7 +11,7 @@ QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 O
 ```powershell
 $installer = Join-Path $env:TEMP "QuickTranslate_1.0.0_x64-setup.exe"
 Invoke-WebRequest "https://github.com/MYPoems/QuickTranslate/releases/download/v1.0.0/QuickTranslate_1.0.0_x64-setup.exe" -OutFile $installer
-if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "528FF9D61F3FD662EAC8229E0DB38E493430211B072D6BB17FF2185591395255") { Remove-Item $installer -Force; throw "安装包校验失败，请勿运行" }
+if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "64E2C76BECFBBA6D9280B55E083F1FDD83773BFBA5AA8A85667B5C3858A90602") { Remove-Item $installer -Force; throw "安装包校验失败，请勿运行" }
 Start-Process $installer -Wait
 Remove-Item $installer -Force
 ```

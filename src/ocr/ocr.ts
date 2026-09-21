@@ -1,15 +1,17 @@
-import { PaddleOCR } from "@paddleocr/paddleocr-js";
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import type { OcrRegionResult } from "../types";
 import "./ocr.css";
+
+type PaddleModule = typeof import("@paddleocr/paddleocr-js");
+type PaddleEngine = Awaited<ReturnType<PaddleModule["PaddleOCR"]["create"]>>;
 
 const root = document.querySelector<HTMLElement>("#app")!;
 let startX = 0;
 let startY = 0;
 let dragging = false;
 let submitting = false;
-let paddleOcr: Promise<Awaited<ReturnType<typeof PaddleOCR.create>>> | undefined;
+let paddleOcr: Promise<PaddleEngine> | undefined;
 let paddleModelKey = "";
 
 export function mountOcr(): void {
@@ -65,9 +67,14 @@ function finishSelection(event: PointerEvent): void {
   submitting = true;
   root.querySelector<HTMLElement>(".ocr-instructions")!.hidden = true;
   root.querySelector<HTMLElement>("#ocr-status")!.hidden = false;
-  void recognize({ x: left, y: top, width, height }).finally(() => {
-    submitting = false;
-  });
+  void recognize({ x: left, y: top, width, height })
+    .catch(async () => {
+      // Never leave the full-screen input-capturing overlay open after an IPC failure.
+      await hide();
+    })
+    .finally(() => {
+      submitting = false;
+    });
 }
 
 async function recognize(region: {
@@ -103,24 +110,33 @@ async function recognize(region: {
 function getPaddleEngine(
   detectionModelPath: string,
   recognitionModelPath: string,
-): Promise<Awaited<ReturnType<typeof PaddleOCR.create>>> {
+): Promise<PaddleEngine> {
   const key = `${detectionModelPath}\n${recognitionModelPath}`;
   if (!paddleOcr || paddleModelKey !== key) {
     paddleModelKey = key;
-    paddleOcr = PaddleOCR.create({
-      textDetectionModelName: "PP-OCRv6_small_det",
-      textDetectionModelAsset: { url: convertFileSrc(detectionModelPath) },
-      textRecognitionModelName: "PP-OCRv6_small_rec",
-      textRecognitionModelAsset: { url: convertFileSrc(recognitionModelPath) },
-      textRecognitionBatchSize: 6,
-      ortOptions: {
-        backend: "wasm",
-        numThreads: 1,
-        simd: true,
-      },
-    });
+    paddleOcr = createPaddleEngine(detectionModelPath, recognitionModelPath);
   }
   return paddleOcr;
+}
+
+async function createPaddleEngine(
+  detectionModelPath: string,
+  recognitionModelPath: string,
+): Promise<PaddleEngine> {
+  // Keep the heavy OpenCV/ONNX runtime out of the default Windows OCR overlay path.
+  const { PaddleOCR } = await import("@paddleocr/paddleocr-js");
+  return PaddleOCR.create({
+    textDetectionModelName: "PP-OCRv6_small_det",
+    textDetectionModelAsset: { url: convertFileSrc(detectionModelPath) },
+    textRecognitionModelName: "PP-OCRv6_small_rec",
+    textRecognitionModelAsset: { url: convertFileSrc(recognitionModelPath) },
+    textRecognitionBatchSize: 6,
+    ortOptions: {
+      backend: "wasm",
+      numThreads: 1,
+      simd: true,
+    },
+  });
 }
 
 function cancelSelection(): void {

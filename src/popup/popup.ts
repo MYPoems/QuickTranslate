@@ -300,7 +300,7 @@ function refreshReadingButtons(): void {
   root.querySelector<HTMLButtonElement>("#read-translation")!.disabled = !currentTranslation.trim();
   root.querySelector<HTMLButtonElement>("#read-both")!.disabled = !currentSource.trim() || !currentTranslation.trim() || translationStale;
 }
-function stopReading(): void { readStart++; reader.stop(); }
+function stopReading(): void { readStart++; reader.stop(); void invoke("stop_speech").catch(() => {}); }
 async function startReading(side: ReadSide | "both"): Promise<void> {
   stopReading();
   const start = readStart;

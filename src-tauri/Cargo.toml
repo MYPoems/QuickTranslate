@@ -30,6 +30,9 @@ minisign-verify = "0.2"
 anyhow = "1"
 async-trait = "0.1"
 base64 = "0.22"
+bzip2 = "0.6"
+tar = "0.4"
+tempfile = "3"
 hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 keyring = { version = "3", features = ["windows-native"] }

@@ -25,6 +25,7 @@ async function mount(entry: "settings" | "popup") {
     async invoke(command: string, args: Record<string, unknown> = {}): Promise<unknown> {
       calls.push({ command, args });
       if (command === "get_settings") return settings;
+      if (command === "get_speech_plugin_status") return { installed: false, phase: "idle", downloaded: 0, downloadBytes: 171837079, version: "test", message: "" };
       if (command === "list_speech_voices") return [{ id: "zh-test", name: "Test Chinese", language: "zh-CN" }];
       if (command === "get_update_state") return update;
       if (command === "get_popup_pinned") return false;
@@ -45,7 +46,7 @@ async function mount(entry: "settings" | "popup") {
     builder.onResolve({ filter: /^@tauri-apps\/api\// }, args => ({ path: args.path, namespace: "qa" }));
     builder.onLoad({ filter: /.*/, namespace: "qa" }, () => ({ contents: "export const invoke = (...args) => globalThis.__qa.invoke(...args); export const listen = (...args) => globalThis.__qa.listen(...args); export const emit = (...args) => globalThis.__qa.emit(...args);" }));
   } }] });
-  const module = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text + `\n// ${Math.random()}`).toString("base64")}`);
+  const module = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text + `\n//# sourceURL=quicktranslate-${entry}-test-${Math.random()}.js`).toString("base64")}`);
   module[entry === "settings" ? "mountSettings" : "mountPopup"]();
   await settle();
   const element = <T extends HTMLElement>(selector: string) => dom.window.document.querySelector<T>(selector)!;
@@ -134,5 +135,35 @@ test("late retranslation cannot replace a newer retry or screenshot", async () =
     pending[2](result("Previous screenshot")); await settle();
     assert.equal(element<HTMLTextAreaElement>(".recognized-text").value, "新的截图");
     assert.doesNotMatch(element("#content").textContent || "", /Previous screenshot/);
+  } finally { close(); }
+});
+
+test("voice plugin progress, cancellation, installed voices and uninstall preserve preferences", async () => {
+  const { element, qa, calls, close } = await mount("settings");
+  try {
+    const original = qa.invoke.bind(qa);
+    let finish: (state: unknown) => void = () => {};
+    qa.invoke = async (command, args = {}) => {
+      if (command === "install_speech_plugin") {
+        qa.emit("speech-plugin-progress", { installed: false, phase: "downloading", downloaded: 1234, downloadBytes: 171837079, version: "test", message: "" });
+        return new Promise(resolve => { finish = resolve; });
+      }
+      if (command === "list_speech_voices") return [{ id: "zh-test", name: "Test Chinese", language: "zh-CN" }, { id: "plugin:kokoro:0", name: "Maple", language: "en-US" }];
+      if (command === "uninstall_speech_plugin") { calls.push({ command, args }); return { installed: false, phase: "idle", downloaded: 0, downloadBytes: 171837079, version: "test", message: "已卸载" }; }
+      return original(command, args);
+    };
+    element("#toggle-speech-plugin").click(); await settle();
+    assert.equal(element<HTMLButtonElement>("#toggle-speech-plugin").disabled, true);
+    assert.equal(element<HTMLProgressElement>("#speech-plugin-progress").value, 1234);
+    element("#cancel-speech-plugin").click(); await settle();
+    assert.ok(calls.some(call => call.command === "cancel_speech_plugin_install"));
+    finish({ installed: true, phase: "ready", downloaded: 171837079, downloadBytes: 171837079, version: "test", message: "已安装" }); await settle();
+    assert.equal(element("#toggle-speech-plugin").textContent, "卸载音色插件");
+    assert.equal(element<HTMLSelectElement>('[name="englishVoice"]').value, "removed-voice");
+    assert.match(element('[name="englishVoice"]').textContent || "", /Maple/);
+    element("#toggle-speech-plugin").click(); await settle();
+    assert.ok(calls.some(call => call.command === "uninstall_speech_plugin"));
+    assert.equal(element<HTMLSelectElement>('[name="speechRate"]').value, "85");
+    assert.equal(element("#speech-plugin-progress").hidden, true);
   } finally { close(); }
 });

@@ -13,6 +13,7 @@ mod providers;
 mod qa;
 mod security;
 mod speech;
+mod speech_plugin;
 mod storage;
 mod translation;
 #[cfg(not(test))]
@@ -118,6 +119,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::speech::list_speech_voices,
             commands::speech::synthesize_speech,
+            commands::speech::stop_speech,
+            commands::speech::get_speech_plugin_status,
+            commands::speech::install_speech_plugin,
+            commands::speech::cancel_speech_plugin_install,
+            commands::speech::uninstall_speech_plugin,
             commands::translation::translate_selected_text,
             commands::translation::translate_text,
             commands::translation::retranslate_text,

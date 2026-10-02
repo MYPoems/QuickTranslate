@@ -11,6 +11,7 @@ import type {
   UpdateSettings,
   SpeechVoice,
   UpdateProgress,
+  SpeechPluginStatus,
 } from "../types";
 import "./settings.css";
 
@@ -20,6 +21,7 @@ let cloudOcrApiKeyConfigured = false;
 let paddleOcrInstalled = false;
 let updateState: UpdateProgress = { phase: "idle", version: "", downloaded: 0, message: "", releaseNotes: "" };
 let formBusy = false;
+let speechPluginState: SpeechPluginStatus = { installed: false, present: false, phase: "idle", downloaded: 0, downloadBytes: 171837079, version: "", message: "" };
 const cloudOcrApiKeyUrl = "https://bailian.console.aliyun.com/?tab=model#/api-key";
 const providerPresets: Record<string, { baseUrl: string; model: string }> = {
   "OpenAI Compatible": { baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
@@ -103,7 +105,9 @@ export function mountSettings(): void {
         </section>
         <section class="ocr-card speech-card">
           <strong>离线朗读</strong>
-          <p>使用 Windows 系统语音，不上传文字、不需要额外 API。缺少音色时请在 Windows 语音设置中安装语音包。</p>
+          <p>系统音色和可选中英文插件均离线运行，不上传文字、不需要 API。插件无需管理员权限。</p>
+          <div class="plugin-row"><div><strong>Kokoro 中英文音色插件</strong><p id="speech-plugin-status" role="status">正在读取插件状态…</p><progress id="speech-plugin-progress" hidden></progress></div><button id="toggle-speech-plugin" type="button" class="secondary">一键安装中英文音色</button><button id="cancel-speech-plugin" type="button" class="secondary" hidden>取消下载</button></div>
+          <p>首次下载约 164 MiB，含精选中文女声、男声和美式/英式英文音色；自动校验后启用。系统音色不可用时自动选择已安装插件；也可在下方明确选择插件音色。插件首次合成较慢。</p>
           <label>语速<select name="speechRate"><option value="50">0.5×</option><option value="75">0.75×</option><option value="85">0.85×</option><option value="100">1×</option><option value="125">1.25×</option><option value="150">1.5×</option><option value="175">1.75×</option><option value="200">2×</option></select></label>
           <label>中文音色<select name="chineseVoice"><option value="">自动选择中文音色</option></select></label>
           <label>英文音色<select name="englishVoice"><option value="">自动选择英文音色</option></select></label>
@@ -164,6 +168,9 @@ export function mountSettings(): void {
     </section>`;
 
   const form = root.querySelector<HTMLFormElement>("#settings-form")!;
+  root.querySelector("#toggle-speech-plugin")!.addEventListener("click", () => void toggleSpeechPlugin(form));
+  root.querySelector("#cancel-speech-plugin")!.addEventListener("click", () => void invoke("cancel_speech_plugin_install").catch(error => setStatus(errorMessage(error), "error")));
+  void listen<SpeechPluginStatus>("speech-plugin-progress", ({ payload }) => renderSpeechPlugin(payload)).then(() => invoke<SpeechPluginStatus>("get_speech_plugin_status")).then(renderSpeechPlugin).catch(error => { root.querySelector("#speech-plugin-status")!.textContent = errorMessage(error); });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     void save(form);
@@ -534,6 +541,30 @@ function setBusy(busy: boolean): void {
   formBusy = busy;
   root.querySelectorAll<HTMLButtonElement>("button").forEach((button) => (button.disabled = busy));
   renderUpdate(updateState);
+  renderSpeechPlugin(speechPluginState);
+}
+
+function renderSpeechPlugin(state: SpeechPluginStatus): void {
+  speechPluginState = state;
+  const busy = state.phase === "downloading" || state.phase === "verifying";
+  const toggle = root.querySelector<HTMLButtonElement>("#toggle-speech-plugin")!;
+  toggle.disabled = busy || formBusy;
+  toggle.textContent = state.installed ? "卸载音色插件" : state.present ? "卸载损坏插件后重装" : "一键安装中英文音色";
+  const cancel = root.querySelector<HTMLButtonElement>("#cancel-speech-plugin")!;
+  cancel.hidden = !busy; cancel.disabled = false;
+  const meter = root.querySelector<HTMLProgressElement>("#speech-plugin-progress")!;
+  meter.hidden = !busy; meter.max = state.downloadBytes; meter.value = state.downloaded;
+  root.querySelector("#speech-plugin-status")!.textContent = state.phase === "downloading" ? `正在下载 · ${formatBytes(state.downloaded)} / ${formatBytes(state.downloadBytes)}` : state.phase === "verifying" ? "正在安全解压与校验…" : state.message || (state.installed ? `已安装 · ${state.version}` : "未安装，Windows 系统音色仍可使用");
+}
+async function toggleSpeechPlugin(form: HTMLFormElement): Promise<void> {
+  try {
+    renderSpeechPlugin({ ...speechPluginState, phase: "verifying", message: "" });
+    const state = await invoke<SpeechPluginStatus>(speechPluginState.present || speechPluginState.installed ? "uninstall_speech_plugin" : "install_speech_plugin");
+    renderSpeechPlugin(state);
+    await loadVoices(form, formValue(form).speech);
+  } catch (error) {
+    renderSpeechPlugin({ ...speechPluginState, phase: speechPluginState.phase === "cancelled" ? "cancelled" : "error", message: errorMessage(error) });
+  }
 }
 
 async function loadVoices(form: HTMLFormElement, preferences = defaultSpeech): Promise<void> {

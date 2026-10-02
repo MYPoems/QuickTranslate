@@ -39,6 +39,8 @@ $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ""
 
 ## 回归验证
 
+仅本机覆盖安装（不发布 Release）：先完成签名构建并记录本轮安装包哈希，使用 `./scripts/install-local.ps1 -ExpectedSha256 "已验证的64位SHA256"`。脚本只停止当前用户安装路径的应用，备份旧程序、设置和关闭进程后的 SQLite/WAL/SHM，校验成功后运行本地安装器并启动应用。备份失败会阻止安装，不修改 Windows 凭据。`scripts/audit-history.py <升级前数据库> <升级后数据库>` 可只读比较历史全文摘要、记录数、收藏数与完整性，只输出统计/摘要，不输出历史内容。
+
 ```powershell
 npm test
 cargo test --locked --manifest-path ./src-tauri/Cargo.toml

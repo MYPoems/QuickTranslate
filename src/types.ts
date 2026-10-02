@@ -143,3 +143,12 @@ export interface UpdateProgress {
   message: string;
   releaseNotes: string;
 }
+export interface SpeechPluginStatus {
+  installed: boolean;
+  present: boolean;
+  phase: "idle" | "downloading" | "verifying" | "ready" | "cancelled" | "error";
+  downloaded: number;
+  downloadBytes: number;
+  version: string;
+  message: string;
+}

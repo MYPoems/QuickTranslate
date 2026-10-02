@@ -45,14 +45,28 @@ pub struct DiagnosticError {
 
 impl AppState {
     pub fn initialize(app: &AppHandle) -> Result<Self, AppError> {
-        let config_dir = app
+        let mut config_dir = app
             .path()
             .app_config_dir()
             .map_err(|error| AppError::Settings(error.to_string()))?;
-        let data_dir = app
+        let mut data_dir = app
             .path()
             .app_data_dir()
             .map_err(|error| AppError::Database(error.to_string()))?;
+        #[cfg(debug_assertions)]
+        if let Some(qa_dir) = crate::qa::directory() {
+            config_dir = qa_dir.join("config");
+            data_dir = qa_dir.join("data");
+        }
+        #[cfg(not(debug_assertions))]
+        let _ = (&mut config_dir, &mut data_dir);
+        let mut secrets: Arc<dyn SecretStore> = Arc::new(KeyringSecretStore);
+        #[cfg(debug_assertions)]
+        if crate::qa::directory().is_some() {
+            secrets = Arc::new(crate::qa::Secrets::default());
+        }
+        #[cfg(not(debug_assertions))]
+        let _ = &mut secrets;
         let settings = Arc::new(SettingsStore::load(config_dir.join("settings.json"))?);
         let popup_size = Arc::new(PopupSizeStore::load(config_dir.join("popup-window.json")));
         let cache_path = data_dir.join("translations.sqlite3");
@@ -67,7 +81,7 @@ impl AppState {
             .map_err(|error| AppError::Internal(error.to_string()))?;
         Ok(Self {
             settings,
-            secrets: Arc::new(KeyringSecretStore),
+            secrets,
             translation: Arc::new(TranslationService::new(client.clone(), cache)),
             http_client: client,
             cache_path,

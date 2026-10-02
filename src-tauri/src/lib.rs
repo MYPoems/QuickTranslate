@@ -9,12 +9,16 @@ mod errors;
 mod ocr;
 mod platform;
 mod providers;
+#[cfg(all(debug_assertions, not(test)))]
+mod qa;
 mod security;
+mod speech;
 mod storage;
 mod translation;
 #[cfg(not(test))]
 mod tray;
 mod update;
+mod upgrade;
 #[cfg(not(test))]
 mod window;
 mod window_state;
@@ -22,7 +26,7 @@ mod window_state;
 #[cfg(not(test))]
 use app::{trigger_selected_translation, AppState};
 #[cfg(not(test))]
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 #[cfg(not(test))]
 use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, Shortcut, ShortcutState};
 
@@ -30,6 +34,8 @@ use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, Shortcut, Shortcu
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(commands::update::UpdateManager::default())
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
@@ -63,6 +69,11 @@ pub fn run() {
             app.manage(state);
             window::restore_popup_size(app.handle());
             use tauri_plugin_global_shortcut::GlobalShortcutExt;
+            #[cfg(debug_assertions)]
+            if qa::directory().is_some() {
+                qa::setup(app.handle());
+                return Ok(());
+            }
             app.global_shortcut()
                 .register(settings.global_shortcut.as_str())?;
             app.global_shortcut()
@@ -75,12 +86,16 @@ pub fn run() {
                 if matches!(window.label(), "popup" | "settings" | "history" | "ocr") =>
             {
                 api.prevent_close();
+                if window.label() == "popup" {
+                    let _ = window.emit("popup-hidden", ());
+                }
                 let _ = window.hide();
             }
             tauri::WindowEvent::Focused(false)
                 if window.label() == "popup"
                     && !window.app_handle().state::<AppState>().popup_pinned() =>
             {
+                let _ = window.emit("popup-hidden", ());
                 let _ = window.hide();
             }
             tauri::WindowEvent::Focused(focused) if window.label() == "ocr" => {
@@ -101,6 +116,8 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
+            commands::speech::list_speech_voices,
+            commands::speech::synthesize_speech,
             commands::translation::translate_selected_text,
             commands::translation::translate_text,
             commands::translation::retranslate_text,
@@ -123,7 +140,11 @@ pub fn run() {
             commands::settings::save_settings,
             commands::settings::test_provider,
             commands::settings::get_diagnostics,
-            commands::settings::check_for_updates,
+            commands::update::check_for_updates,
+            commands::update::get_update_state,
+            commands::update::download_update,
+            commands::update::cancel_update_download,
+            commands::update::install_update,
             commands::settings::export_settings_backup,
             commands::settings::import_settings_backup,
         ])

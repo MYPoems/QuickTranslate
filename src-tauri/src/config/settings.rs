@@ -9,9 +9,9 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{errors::AppError, security::SecretStore};
+use crate::{errors::AppError, security::SecretStore, speech::SpeechPreferences};
 
-pub const CURRENT_SETTINGS_SCHEMA: u32 = 2;
+pub const CURRENT_SETTINGS_SCHEMA: u32 = 3;
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -40,10 +40,12 @@ pub struct AppSettings {
     pub model: String,
     pub global_shortcut: String,
     pub ocr_shortcut: String,
+    #[serde(default = "legacy_ocr_engine")]
     pub ocr_engine: OcrEngineKind,
     pub ocr_language: OcrLanguage,
     pub cloud_ocr_base_url: String,
     pub cloud_ocr_model: String,
+    pub speech: SpeechPreferences,
 }
 
 impl Default for AppSettings {
@@ -55,10 +57,11 @@ impl Default for AppSettings {
             model: "gpt-4.1-mini".into(),
             global_shortcut: "Alt+Q".into(),
             ocr_shortcut: "Alt+W".into(),
-            ocr_engine: OcrEngineKind::Windows,
+            ocr_engine: OcrEngineKind::Cloud,
             ocr_language: OcrLanguage::Auto,
             cloud_ocr_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
             cloud_ocr_model: "qwen3.5-ocr".into(),
+            speech: SpeechPreferences::default(),
         }
     }
 }
@@ -72,9 +75,14 @@ impl AppSettings {
     }
 }
 
+fn legacy_ocr_engine() -> OcrEngineKind {
+    OcrEngineKind::Windows
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsView {
+    pub speech: SpeechPreferences,
     pub provider: String,
     pub base_url: String,
     pub model: String,
@@ -93,6 +101,8 @@ pub struct SettingsView {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSettings {
+    #[serde(default)]
+    pub speech: SpeechPreferences,
     pub provider: String,
     pub base_url: String,
     pub model: String,
@@ -155,6 +165,7 @@ impl SettingsStore {
     ) -> Result<SettingsView, AppError> {
         let settings = self.get()?;
         Ok(SettingsView {
+            speech: settings.speech,
             provider: settings.provider,
             base_url: settings.base_url,
             model: settings.model,
@@ -172,6 +183,7 @@ impl SettingsStore {
     }
 
     pub fn validate(update: &UpdateSettings) -> Result<AppSettings, AppError> {
+        update.speech.validate()?;
         let provider = update.provider.trim().to_string();
         let model = update.model.trim().to_string();
         let global_shortcut = update.global_shortcut.trim().to_string();
@@ -202,6 +214,7 @@ impl SettingsStore {
         };
 
         Ok(AppSettings {
+            speech: update.speech.clone(),
             schema_version: CURRENT_SETTINGS_SCHEMA,
             provider,
             base_url: validate_base_url(&update.base_url)?,
@@ -285,6 +298,11 @@ fn read_settings(path: &Path) -> Result<(AppSettings, u32), AppError> {
         .and_then(serde_json::Value::as_u64)
         .and_then(|value| u32::try_from(value).ok())
         .unwrap_or(0);
+    if source_schema > CURRENT_SETTINGS_SCHEMA {
+        return Err(AppError::Settings(
+            "设置来自更高版本，拒绝降级覆盖；请恢复升级前备份或安装新版本".into(),
+        ));
+    }
     let settings =
         serde_json::from_value(raw).map_err(|error| AppError::Settings(error.to_string()))?;
     Ok((settings, source_schema))
@@ -292,6 +310,18 @@ fn read_settings(path: &Path) -> Result<(AppSettings, u32), AppError> {
 
 fn load_with_backup(path: &Path) -> Result<(AppSettings, u32), AppError> {
     if path.exists() {
+        // A future schema is not corruption. Never restore an older backup over it.
+        let raw = fs::read(path)
+            .ok()
+            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok());
+        if raw
+            .as_ref()
+            .and_then(|value| value.get("schemaVersion"))
+            .and_then(serde_json::Value::as_u64)
+            .is_some_and(|version| version > u64::from(CURRENT_SETTINGS_SCHEMA))
+        {
+            return Err(AppError::Settings("设置来自更高版本，拒绝降级覆盖".into()));
+        }
         match read_settings(path) {
             Ok(settings) => return Ok(settings),
             Err(primary_error) => {
@@ -367,8 +397,119 @@ fn persist_atomically(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn v1_upgrade_preserves_every_existing_setting_and_is_idempotent() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let fixture = include_str!("../../../tests/fixtures/settings-v1.0.json");
+        fs::write(&path, fixture).unwrap();
+        let before: AppSettings = serde_json::from_str(fixture).unwrap();
+        let upgraded = SettingsStore::load(path.clone()).unwrap().get().unwrap();
+        assert_eq!(
+            upgraded,
+            AppSettings {
+                schema_version: CURRENT_SETTINGS_SCHEMA,
+                ..before
+            }
+        );
+        assert_eq!(
+            fs::read_to_string(migration_backup_path(&path, 2)).unwrap(),
+            fixture
+        );
+        assert_eq!(upgraded.speech, SpeechPreferences::default());
+        let first = fs::read(&path).unwrap();
+        let reopened = SettingsStore::load(path.clone()).unwrap().get().unwrap();
+        assert_eq!(upgraded, reopened);
+        assert_eq!(fs::read(&path).unwrap(), first);
+        assert_eq!(
+            fs::read_to_string(migration_backup_path(&path, 2)).unwrap(),
+            fixture
+        );
+    }
+
+    #[test]
+    fn legacy_local_ocr_is_not_silently_changed_to_cloud() {
+        let directory = tempfile::tempdir().unwrap();
+        for engine in ["windows", "paddle"] {
+            let path = directory.path().join(format!("{engine}.json"));
+            fs::write(
+                &path,
+                format!(r#"{{"schemaVersion":2,"ocrEngine":"{engine}"}}"#),
+            )
+            .unwrap();
+            let migrated = SettingsStore::load(path).unwrap().get().unwrap();
+            assert_eq!(serde_json::to_value(migrated.ocr_engine).unwrap(), engine);
+        }
+        let path = directory.path().join("legacy.json");
+        fs::write(&path, r#"{"model":"custom-model"}"#).unwrap();
+        assert_eq!(
+            SettingsStore::load(path).unwrap().get().unwrap().ocr_engine,
+            OcrEngineKind::Windows
+        );
+        assert_eq!(AppSettings::default().ocr_engine, OcrEngineKind::Cloud);
+    }
+
+    #[test]
+    fn voice_preferences_and_keys_privacy_survive_save_reload() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let store = SettingsStore::load(path.clone()).unwrap();
+        let candidate = AppSettings {
+            speech: SpeechPreferences {
+                rate: 125,
+                chinese_voice: "Chinese-test".into(),
+                english_voice: "English-test".into(),
+                bilingual: true,
+            },
+            ..AppSettings::default()
+        };
+        store.replace(candidate.clone()).unwrap();
+        assert_eq!(
+            SettingsStore::load(path.clone()).unwrap().get().unwrap(),
+            candidate
+        );
+        let serialized = fs::read_to_string(path).unwrap();
+        assert!(!serialized.contains("apiKey"));
+        assert!(!serialized.contains("secret"));
+    }
+
+    #[test]
+    fn future_schema_is_not_overwritten_even_with_old_recovery_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let future = r#"{"schemaVersion":999,"model":"future-model","futureField":"preserve"}"#;
+        fs::write(&path, future).unwrap();
+        fs::write(backup_path(&path), "{}").unwrap();
+        assert!(SettingsStore::load(path.clone()).is_err());
+        assert_eq!(fs::read_to_string(path).unwrap(), future);
+    }
+
+    #[test]
+    fn corrupt_or_missing_primary_recovers_valid_atomic_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let fixture = include_str!("../../../tests/fixtures/settings-v1.0.json");
+        fs::write(&path, "{incomplete").unwrap();
+        fs::write(backup_path(&path), fixture).unwrap();
+        assert_eq!(
+            SettingsStore::load(path.clone())
+                .unwrap()
+                .get()
+                .unwrap()
+                .model,
+            "qwen-turbo"
+        );
+        fs::remove_file(&path).unwrap();
+        fs::write(backup_path(&path), fixture).unwrap();
+        assert_eq!(
+            SettingsStore::load(path).unwrap().get().unwrap().ocr_engine,
+            OcrEngineKind::Cloud
+        );
+    }
+
     fn update(base_url: &str) -> UpdateSettings {
         UpdateSettings {
+            speech: SpeechPreferences::default(),
             provider: "OpenAI Compatible".into(),
             base_url: base_url.into(),
             model: "test-model".into(),

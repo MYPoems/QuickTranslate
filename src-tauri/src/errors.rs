@@ -29,6 +29,10 @@ pub enum AppError {
     Ocr(String),
     #[error("OCR found no text")]
     OcrNoText,
+    #[error("speech operation failed: {0}")]
+    Speech(String),
+    #[error("update operation failed: {0}")]
+    Update(String),
     #[cfg_attr(windows, allow(dead_code))]
     #[error("this platform is not supported yet")]
     UnsupportedPlatform,
@@ -52,6 +56,8 @@ impl AppError {
             Self::AutoStart(_) => "AUTOSTART_ERROR",
             Self::Ocr(_) => "OCR_ERROR",
             Self::OcrNoText => "OCR_NO_TEXT",
+            Self::Speech(_) => "SPEECH_ERROR",
+            Self::Update(_) => "UPDATE_ERROR",
             Self::UnsupportedPlatform => "UNSUPPORTED_PLATFORM",
             Self::Internal(_) => "INTERNAL_ERROR",
         }
@@ -72,6 +78,7 @@ impl AppError {
             Self::AutoStart(_) => "无法更新开机启动设置".into(),
             Self::Ocr(message) => format!("OCR 识别失败：{message}"),
             Self::OcrNoText => "所选区域未识别到文字".into(),
+            Self::Speech(message) | Self::Update(message) => message.clone(),
             Self::UnsupportedPlatform => "当前平台暂不支持获取选中文字".into(),
             Self::Internal(_) => "发生内部错误，请稍后重试".into(),
         }

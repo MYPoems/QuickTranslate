@@ -1,4 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { defaultSpeech } from "../speech/reader";
 import type {
   AppError,
   DiagnosticsView,
@@ -7,6 +9,8 @@ import type {
   SettingsView,
   UpdateInfo,
   UpdateSettings,
+  SpeechVoice,
+  UpdateProgress,
 } from "../types";
 import "./settings.css";
 
@@ -14,6 +18,8 @@ const root = document.querySelector<HTMLElement>("#app")!;
 let apiKeyConfigured = false;
 let cloudOcrApiKeyConfigured = false;
 let paddleOcrInstalled = false;
+let updateState: UpdateProgress = { phase: "idle", version: "", downloaded: 0, message: "", releaseNotes: "" };
+let formBusy = false;
 const cloudOcrApiKeyUrl = "https://bailian.console.aliyun.com/?tab=model#/api-key";
 const providerPresets: Record<string, { baseUrl: string; model: string }> = {
   "OpenAI Compatible": { baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
@@ -53,13 +59,13 @@ export function mountSettings(): void {
         <section class="ocr-card">
           <div>
             <strong>OCR 识别引擎</strong>
-            <p>Windows OCR 默认可用；高精度本地插件和云端视觉模型均为可选配置。</p>
+            <p>推荐云端视觉 OCR；Windows OCR 与本地插件用于离线或云端不可用时手动切换。</p>
           </div>
           <label>识别方案
             <select name="ocrEngine">
-              <option value="windows">Windows OCR（内置，默认）</option>
-              <option value="paddle">PP-OCRv6 Small（本地高精度插件）</option>
-              <option value="cloud">云端视觉 OCR（自备 API Key）</option>
+              <option value="cloud">云端视觉 OCR（推荐，自备 API Key）</option>
+              <option value="windows">Windows OCR（内置离线替代）</option>
+              <option value="paddle">PP-OCRv6 Small（本地离线替代）</option>
             </select>
           </label>
           <div id="windows-ocr-options" class="ocr-options">
@@ -83,7 +89,7 @@ export function mountSettings(): void {
             <p>模型在本机运行，截图不会上传；首次初始化可能需要数秒。</p>
           </div>
           <div id="cloud-ocr-options" class="ocr-options" hidden>
-            <p class="privacy-warning">云端模式会把所选截图发送给你配置的服务商，仅在你主动选择该模式后启用。</p>
+            <p class="privacy-warning">云端模式会把所选截图发送给你配置的服务商，仅在已配置 Key 且你主动框选截图时发送。不希望上传时请改用离线方案。</p>
             <label>Cloud OCR Base URL<input name="cloudOcrBaseUrl" type="url" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" /></label>
             <label>Cloud OCR Model<input name="cloudOcrModel" placeholder="qwen3.5-ocr" /></label>
             <label>Cloud OCR API Key<input name="cloudOcrApiKey" type="password" autocomplete="off" placeholder="保持为空则不修改" /></label>
@@ -94,6 +100,15 @@ export function mountSettings(): void {
               <button id="copy-cloud-key-url" type="button" class="secondary">复制 API 申请网址</button>
             </div>
           </div>
+        </section>
+        <section class="ocr-card speech-card">
+          <strong>离线朗读</strong>
+          <p>使用 Windows 系统语音，不上传文字、不需要额外 API。缺少音色时请在 Windows 语音设置中安装语音包。</p>
+          <label>语速<select name="speechRate"><option value="50">0.5×</option><option value="75">0.75×</option><option value="85">0.85×</option><option value="100">1×</option><option value="125">1.25×</option><option value="150">1.5×</option><option value="175">1.75×</option><option value="200">2×</option></select></label>
+          <label>中文音色<select name="chineseVoice"><option value="">自动选择中文音色</option></select></label>
+          <label>英文音色<select name="englishVoice"><option value="">自动选择英文音色</option></select></label>
+          <label class="checkbox-row"><input name="bilingual" type="checkbox" />朗读原文后继续朗读译文</label>
+          <p id="voice-status" role="status">正在读取系统音色…</p>
         </section>
         <div class="preference-card">
           <label class="checkbox-row"><input name="autoStartEnabled" type="checkbox" />开机自动启动</label>
@@ -115,9 +130,21 @@ export function mountSettings(): void {
           <div>
             <strong>应用更新</strong>
             <p id="update-status">从 GitHub Releases 检查正式版本。</p>
+            <progress id="update-progress" hidden></progress>
+            <details id="release-notes" hidden><summary>更新说明</summary><p id="release-notes-text"></p></details>
           </div>
-          <button id="check-update" type="button" class="secondary">检查更新</button>
+          <div class="update-actions">
+            <button id="check-update" type="button" class="secondary">检查更新</button>
+            <button id="download-update" type="button" class="secondary" hidden>下载并校验</button>
+            <button id="cancel-update" type="button" class="secondary" hidden>取消下载</button>
+            <button id="install-update" type="button" class="primary" hidden>安装更新…</button>
+          </div>
         </div>
+        <dialog id="install-dialog">
+          <h2>确认安装更新</h2><p id="install-confirm-text"></p>
+          <p>签名校验已通过。安装前会自动备份设置、悬浮窗尺寸及翻译历史。安装时应用会退出，完成后重新启动。API Key 保留在 Windows 凭据管理器，不写入备份。</p>
+          <div class="backup-actions"><button id="defer-install" type="button" class="secondary">暂不安装</button><button id="confirm-install" type="button" class="primary">确认安装</button></div>
+        </dialog>
         <details class="backup-card">
           <summary>设置备份与恢复（不包含 API Key）</summary>
           <textarea id="settings-backup" rows="8" spellcheck="false" placeholder="导出的 JSON 会显示在这里；也可粘贴备份后载入表单。"></textarea>
@@ -171,6 +198,15 @@ export function mountSettings(): void {
   root
     .querySelector<HTMLButtonElement>("#check-update")!
     .addEventListener("click", () => void checkUpdates());
+  root.querySelector("#download-update")!.addEventListener("click", () => void downloadUpdate());
+  root.querySelector("#cancel-update")!.addEventListener("click", () => void invoke("cancel_update_download").catch(error => setStatus(errorMessage(error), "error")));
+  root.querySelector("#install-update")!.addEventListener("click", () => {
+    root.querySelector("#install-confirm-text")!.textContent = `即将从当前版本升级到 v${updateState.version}。是否现在安装？未保存的表单更改不会进入备份，请先保存。`;
+    root.querySelector<HTMLDialogElement>("#install-dialog")!.showModal();
+  });
+  root.querySelector("#defer-install")!.addEventListener("click", () => root.querySelector<HTMLDialogElement>("#install-dialog")!.close());
+  root.querySelector("#confirm-install")!.addEventListener("click", () => void confirmInstall());
+  void listen<UpdateProgress>("update-progress", ({ payload }) => renderUpdate(payload)).then(() => invoke<UpdateProgress>("get_update_state").then(renderUpdate)).catch(error => setStatus(errorMessage(error), "error"));
   root
     .querySelector<HTMLButtonElement>("#export-settings")!
     .addEventListener("click", () => void exportSettings());
@@ -194,6 +230,7 @@ async function load(form: HTMLFormElement): Promise<void> {
     setInput(form, "cloudOcrBaseUrl", settings.cloudOcrBaseUrl);
     setInput(form, "cloudOcrModel", settings.cloudOcrModel);
     setCheckbox(form, "autoStartEnabled", settings.autoStartEnabled);
+    await loadVoices(form, settings.speech);
     apiKeyConfigured = settings.apiKeyConfigured;
     cloudOcrApiKeyConfigured = settings.cloudOcrApiKeyConfigured;
     paddleOcrInstalled = settings.paddleOcrInstalled;
@@ -297,8 +334,7 @@ async function checkUpdates(): Promise<void> {
   try {
     const update = await invoke<UpdateInfo>("check_for_updates");
     if (update.updateAvailable) {
-      output.textContent = `发现 v${update.latestVersion}，下载页已复制。`;
-      await invoke("copy_translation", { text: update.releaseUrl });
+      output.textContent = `发现 v${update.latestVersion}，可下载并校验后安装。`;
     } else {
       output.textContent = `当前 v${update.currentVersion} 已是最新正式版。`;
     }
@@ -342,6 +378,7 @@ async function importSettings(form: HTMLFormElement): Promise<void> {
     setInput(form, "cloudOcrBaseUrl", backup.cloudOcrBaseUrl);
     setInput(form, "cloudOcrModel", backup.cloudOcrModel);
     setCheckbox(form, "autoStartEnabled", backup.autoStartEnabled);
+    await loadVoices(form, backup.speech || defaultSpeech);
     refreshKeyStatus(form);
     refreshOcrPanels(form);
     setStatus("备份已载入表单，请确认后点击保存", "success");
@@ -377,6 +414,7 @@ function formValue(form: HTMLFormElement): UpdateSettings {
   const apiKey = String(data.get("apiKey") || "").trim();
   const cloudOcrApiKey = String(data.get("cloudOcrApiKey") || "").trim();
   return {
+    speech: { rate: Number(data.get("speechRate") || 100), chineseVoice: String(data.get("chineseVoice") || ""), englishVoice: String(data.get("englishVoice") || ""), bilingual: data.get("bilingual") === "on" },
     provider: String(data.get("provider") || "OpenAI Compatible"),
     baseUrl: String(data.get("baseUrl") || "").trim(),
     model: String(data.get("model") || "").trim(),
@@ -493,7 +531,58 @@ function formatBytes(value: number): string {
 }
 
 function setBusy(busy: boolean): void {
+  formBusy = busy;
   root.querySelectorAll<HTMLButtonElement>("button").forEach((button) => (button.disabled = busy));
+  renderUpdate(updateState);
+}
+
+async function loadVoices(form: HTMLFormElement, preferences = defaultSpeech): Promise<void> {
+  setInput(form, "speechRate", String(preferences.rate));
+  const rates = form.elements.namedItem("speechRate") as HTMLSelectElement;
+  if (!rates.value) { rates.add(new Option(`${preferences.rate / 100}×`, String(preferences.rate))); rates.value = String(preferences.rate); }
+  setCheckbox(form, "bilingual", preferences.bilingual);
+  let voices: SpeechVoice[] = [];
+  try { voices = await invoke<SpeechVoice[]>("list_speech_voices"); root.querySelector("#voice-status")!.textContent = `检测到 ${voices.length} 个系统音色；每段文字自动匹配中英文。`; }
+  catch (error) { root.querySelector("#voice-status")!.textContent = errorMessage(error); }
+  for (const [name, language, saved] of [["chineseVoice", "zh", preferences.chineseVoice], ["englishVoice", "en", preferences.englishVoice]]) {
+    const select = form.elements.namedItem(name) as HTMLSelectElement;
+    select.replaceChildren(new Option(`自动选择${language === "zh" ? "中文" : "英文"}音色`, ""));
+    for (const voice of voices.filter(voice => voice.language.toLowerCase().startsWith(language))) select.add(new Option(`${voice.name} · ${voice.language}`, voice.id));
+    if (saved && !Array.from(select.options).some(option => option.value === saved)) select.add(new Option("已保存的音色（当前不可用，请重新选择）", saved));
+    select.value = saved;
+  }
+}
+function renderUpdate(progress: UpdateProgress): void {
+  updateState = progress;
+  const downloading = progress.phase === "downloading" || progress.phase === "verifying";
+  const busy = downloading || progress.phase === "checking" || progress.phase === "installing";
+  const check = root.querySelector<HTMLButtonElement>("#check-update")!;
+  check.disabled = busy || formBusy;
+  const download = root.querySelector<HTMLButtonElement>("#download-update")!;
+  download.hidden = !["available", "cancelled", "error"].includes(progress.phase) || !progress.version;
+  download.disabled = formBusy;
+  const cancel = root.querySelector<HTMLButtonElement>("#cancel-update")!;
+  cancel.hidden = !downloading; cancel.disabled = false;
+  const install = root.querySelector<HTMLButtonElement>("#install-update")!;
+  install.hidden = progress.phase !== "ready"; install.disabled = formBusy;
+  const meter = root.querySelector<HTMLProgressElement>("#update-progress")!;
+  meter.hidden = !downloading;
+  if (progress.total) { meter.max = progress.total; meter.value = progress.downloaded; } else meter.removeAttribute("value");
+  const output = root.querySelector("#update-status")!;
+  output.textContent = progress.phase === "downloading" ? `下载 v${progress.version} · ${formatBytes(progress.downloaded)}${progress.total ? ` / ${formatBytes(progress.total)}` : ""}` : progress.phase === "verifying" ? "下载完成，正在校验签名与版本…" : progress.phase === "checking" ? "正在检查 GitHub Releases…" : progress.message || "从 GitHub Releases 检查正式版本。";
+  root.querySelector<HTMLElement>("#release-notes")!.hidden = !progress.releaseNotes;
+  root.querySelector("#release-notes-text")!.textContent = progress.releaseNotes;
+}
+async function downloadUpdate(): Promise<void> {
+  try { await invoke("download_update"); }
+  catch (error) { setStatus(errorMessage(error), "error"); }
+}
+async function confirmInstall(): Promise<void> {
+  const button = root.querySelector<HTMLButtonElement>("#confirm-install")!;
+  button.disabled = true;
+  try { await invoke("install_update", { version: updateState.version, confirmed: true }); }
+  catch (error) { setStatus(errorMessage(error), "error"); }
+  finally { button.disabled = false; root.querySelector<HTMLDialogElement>("#install-dialog")!.close(); }
 }
 
 function setStatus(message: string, kind: "neutral" | "success" | "error"): void {

@@ -1,4 +1,16 @@
 .settings-window { overflow: auto; background: #f4f4f5; }
+[hidden] { display: none !important; }
+.speech-card > p { margin: 0; color: #71717a; font-size: 12px; line-height: 1.6; }
+.update-actions { display: flex; flex-direction: column; gap: 7px; flex: none; }
+.maintenance-card > div:first-child { min-width: 0; }
+#update-status, #voice-status { overflow-wrap: anywhere; }
+#update-progress { width: 100%; margin-top: 8px; }
+#release-notes-text { white-space: pre-wrap; }
+dialog { max-width: 420px; border: 1px solid #d4d4d8; border-radius: 12px; padding: 24px; background: #fafafa; color: #18181b; }
+dialog::backdrop { background: rgba(0,0,0,.4); }
+dialog p { font-size: 13px; line-height: 1.7; }
+dialog button { border-radius: 7px; padding: 8px 12px; }
+@media (prefers-color-scheme: dark) { dialog { background: #27272a; color: #fafafa; border-color: #52525b; } }
 .settings-shell { width: min(100%, 620px); margin: 0 auto; padding: 30px 34px 36px; }
 .settings-shell header { margin-bottom: 25px; }
 .eyebrow { margin: 0 0 6px; color: #71717a; font-size: 11px; font-weight: 700; letter-spacing: .13em; }

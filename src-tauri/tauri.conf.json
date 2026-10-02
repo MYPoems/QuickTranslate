@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "QuickTranslate",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "identifier": "com.quicktranslate.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -31,7 +31,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost data:; img-src 'self' asset: http://asset.localhost data: blob:; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'",
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost asset: http://asset.localhost data:; img-src 'self' asset: http://asset.localhost data: blob:; media-src 'self' data: blob:; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'",
       "assetProtocol": {
         "enable": true,
         "scope": ["$APPDATA/com.quicktranslate.desktop/ocr-plugins/**"]
@@ -39,6 +39,7 @@
     }
   },
   "bundle": {
+    "createUpdaterArtifacts": true,
     "active": true,
     "targets": "all",
     "resources": {
@@ -51,5 +52,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEE2MkYxQTE3N0NDNDIxNzAKUldSd0ljUjhGeG92cHFjUnFSOUEzUC9LaGk3WUFrbS9PaEU4WkVTLy9tejRFSnhQdFgxUUhRZ1AK",
+      "endpoints": ["https://github.com/MYPoems/QuickTranslate/releases/latest/download/latest.json"],
+      "requireSignedVersion": true,
+      "windows": { "installMode": "passive" }
+    }
   }
 }

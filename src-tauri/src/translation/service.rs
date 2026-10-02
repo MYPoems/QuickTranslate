@@ -19,6 +19,12 @@ pub struct TranslationService {
 }
 
 impl TranslationService {
+    pub async fn backup_cache(&self, path: std::path::PathBuf) -> Result<(), AppError> {
+        let cache = Arc::clone(&self.cache);
+        tokio::task::spawn_blocking(move || cache.backup_to(&path))
+            .await
+            .map_err(|error| AppError::Internal(error.to_string()))?
+    }
     pub fn new(client: reqwest::Client, cache: Arc<TranslationCache>) -> Self {
         Self { client, cache }
     }

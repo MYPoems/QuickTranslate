@@ -35,6 +35,7 @@ pub struct DiagnosticsView {
 #[derive(Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SettingsBackup {
+    speech: crate::speech::SpeechPreferences,
     schema_version: u32,
     provider: String,
     base_url: String,
@@ -52,13 +53,14 @@ impl Default for SettingsBackup {
     fn default() -> Self {
         let settings = AppSettings::default();
         Self {
+            speech: settings.speech,
             schema_version: settings.schema_version,
             provider: settings.provider,
             base_url: settings.base_url,
             model: settings.model,
             global_shortcut: settings.global_shortcut,
             ocr_shortcut: settings.ocr_shortcut,
-            ocr_engine: settings.ocr_engine,
+            ocr_engine: OcrEngineKind::Windows,
             ocr_language: settings.ocr_language,
             cloud_ocr_base_url: settings.cloud_ocr_base_url,
             cloud_ocr_model: settings.cloud_ocr_model,
@@ -83,6 +85,15 @@ pub fn get_settings(app: AppHandle) -> Result<SettingsView, AppError> {
 pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsView, AppError> {
     let state = app.state::<AppState>();
     let candidate = SettingsStore::validate(&update)?;
+    #[cfg(debug_assertions)]
+    if crate::qa::directory().is_some() {
+        state.settings.replace(candidate)?;
+        return state.settings.view(
+            state.secrets.as_ref(),
+            false,
+            crate::ocr::plugin::status(&state.ocr_plugin_dir).installed,
+        );
+    }
     let previous = state.settings.get()?;
     let previous_api_key = state.secrets.get_api_key()?;
     let previous_cloud_ocr_api_key = state.secrets.get_cloud_ocr_api_key()?;
@@ -237,6 +248,7 @@ pub fn export_settings_backup(app: AppHandle) -> Result<String, AppError> {
     let state = app.state::<AppState>();
     let settings = state.settings.get()?;
     let backup = SettingsBackup {
+        speech: settings.speech,
         schema_version: CURRENT_SETTINGS_SCHEMA,
         provider: settings.provider,
         base_url: settings.base_url,
@@ -265,6 +277,7 @@ pub fn import_settings_backup(contents: String) -> Result<SettingsBackup, AppErr
         ));
     }
     let normalized = SettingsStore::validate(&UpdateSettings {
+        speech: backup.speech,
         provider: backup.provider,
         base_url: backup.base_url,
         model: backup.model,
@@ -281,6 +294,7 @@ pub fn import_settings_backup(contents: String) -> Result<SettingsBackup, AppErr
         auto_start_enabled: backup.auto_start_enabled,
     })?;
     Ok(SettingsBackup {
+        speech: normalized.speech,
         schema_version: CURRENT_SETTINGS_SCHEMA,
         provider: normalized.provider,
         base_url: normalized.base_url,
@@ -293,9 +307,4 @@ pub fn import_settings_backup(contents: String) -> Result<SettingsBackup, AppErr
         cloud_ocr_model: normalized.cloud_ocr_model,
         auto_start_enabled: backup.auto_start_enabled,
     })
-}
-
-#[tauri::command]
-pub async fn check_for_updates(app: AppHandle) -> Result<crate::update::UpdateInfo, AppError> {
-    crate::update::check_for_updates(&app.state::<AppState>().http_client).await
 }

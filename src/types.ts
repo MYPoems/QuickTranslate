@@ -1,6 +1,9 @@
 export type Language = "chinese" | "english";
 export type OcrEngineKind = "windows" | "paddle" | "cloud";
 export type OcrLanguage = "auto" | "chinese" | "english";
+export interface SpeechPreferences { rate: number; chineseVoice: string; englishVoice: string; bilingual: boolean }
+export interface SpeechVoice { id: string; name: string; language: string }
+export interface SpeechAudio { audioDataUrl: string; voiceName: string }
 
 export interface TranslationResult {
   sourceText: string;
@@ -31,6 +34,7 @@ export interface TranslationEvent {
 }
 
 export interface SettingsView {
+  speech: SpeechPreferences;
   provider: string;
   baseUrl: string;
   model: string;
@@ -47,6 +51,7 @@ export interface SettingsView {
 }
 
 export interface UpdateSettings {
+  speech: SpeechPreferences;
   provider: string;
   baseUrl: string;
   model: string;
@@ -93,6 +98,7 @@ export interface HistoryEntry {
 }
 
 export interface SettingsBackup {
+  speech: SpeechPreferences;
   schemaVersion: number;
   provider: string;
   baseUrl: string;
@@ -128,4 +134,12 @@ export interface UpdateInfo {
   latestVersion: string;
   updateAvailable: boolean;
   releaseUrl: string;
+}
+export interface UpdateProgress {
+  phase: "idle" | "checking" | "available" | "downloading" | "verifying" | "ready" | "installing" | "cancelled" | "error";
+  version: string;
+  downloaded: number;
+  total?: number;
+  message: string;
+  releaseNotes: string;
 }

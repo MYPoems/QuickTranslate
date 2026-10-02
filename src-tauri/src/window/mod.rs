@@ -1,7 +1,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{
-    AppHandle, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
+    AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, WebviewUrl,
     WebviewWindowBuilder, Window,
 };
 
@@ -85,6 +85,7 @@ pub fn toggle_ocr_overlay(app: &AppHandle) {
         return;
     };
     if let Some(popup) = app.get_webview_window("popup") {
+        let _ = popup.emit("popup-hidden", ());
         let _ = popup.hide();
     }
     let window = if let Some(window) = app.get_webview_window("ocr") {

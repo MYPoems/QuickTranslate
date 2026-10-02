@@ -1,6 +1,6 @@
 [package]
 name = "quicktranslate"
-version = "1.0.0"
+version = "1.2.0"
 description = "A lightweight Windows selection translation popup"
 authors = ["QuickTranslate contributors"]
 edition = "2021"
@@ -22,6 +22,10 @@ bench = false
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+[dev-dependencies]
+tempfile = "3"
+minisign-verify = "0.2"
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
@@ -30,13 +34,14 @@ hex = "0.4"
 image = { version = "0.25", default-features = false, features = ["png"] }
 keyring = { version = "3", features = ["windows-native"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-autostart = "2"
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-updater = "2"
 thiserror = "2"
 tokio = { version = "1", features = ["sync", "time"] }
 tokio-util = { version = "0.7", features = ["rt"] }
@@ -47,6 +52,8 @@ windows = { version = "0.61", features = [
   "Globalization",
   "Graphics_Imaging",
   "Media_Ocr",
+  "Media_Core",
+  "Media_SpeechSynthesis",
   "Storage_Streams",
   "Win32_Foundation",
   "Win32_Graphics_Gdi",

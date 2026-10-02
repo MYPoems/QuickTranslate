@@ -30,6 +30,22 @@ pub struct HistoryEntry {
 }
 
 impl TranslationCache {
+    pub fn backup_to(&self, path: &Path) -> Result<(), AppError> {
+        if path.exists() {
+            return Err(AppError::Database("拒绝覆盖已有历史备份".into()));
+        }
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| AppError::Database("cache lock poisoned".into()))?;
+        connection.backup("main", path, None)?;
+        let backup = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+        let integrity: String = backup.query_row("PRAGMA integrity_check", [], |row| row.get(0))?;
+        if integrity != "ok" {
+            return Err(AppError::Database("历史备份完整性检查失败".into()));
+        }
+        Ok(())
+    }
     pub fn open(path: &Path) -> Result<Self, AppError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
@@ -361,8 +377,56 @@ mod tests {
                  );",
             )
             .unwrap();
+        let mut historical = result();
+        historical.source_text = "原文 Hello 🦀".into();
+        historical.definitions = vec!["旧版本释义".into()];
+        historical.example = Some("example 示例".into());
+        historical.phonetic = Some("/həˈləʊ/".into());
+        connection.execute("INSERT INTO translation_cache (id,cache_key,source_text,source_language,target_language,translation,result_json,provider,model,created_at,hit_count) VALUES (42,'old',?1,'en','zh',?2,?3,'阿里云百炼','old-model',123456,7)", params![historical.source_text, historical.translation, serde_json::to_string(&historical).unwrap()]).unwrap();
         let cache = TranslationCache::from_connection(connection).unwrap();
+        let entry = &cache.history("", false, 10).unwrap()[0];
+        assert_eq!(entry.id, 42);
+        assert_eq!(entry.created_at, 123456);
+        assert_eq!(entry.source_text, historical.source_text);
+        assert!(!entry.favorite);
+        let loaded = cache.get("old").unwrap().unwrap();
+        assert_eq!(loaded.definitions, historical.definitions);
+        assert_eq!(loaded.phonetic, historical.phonetic);
+        assert_eq!(loaded.example, historical.example);
+        cache.set_favorite(42, true).unwrap();
+        let connection = cache.connection.into_inner().unwrap();
+        let cache = TranslationCache::from_connection(connection).unwrap();
+        assert!(cache.history("", true, 10).unwrap()[0].favorite);
         cache.put("migrated", &result()).unwrap();
-        assert!(!cache.history("", false, 10).unwrap()[0].favorite);
+        assert_eq!(cache.len().unwrap(), 2);
+    }
+
+    #[test]
+    fn online_backup_contains_uncheckpointed_wal_history_and_favorites() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("history.sqlite3");
+        let backup_path = directory.path().join("backup.sqlite3");
+        let cache = TranslationCache::open(&path).unwrap();
+        let mut historical = result();
+        historical.source_text = "中文 English 🦀".into();
+        cache.put("first", &historical).unwrap();
+        let id = cache.history("", false, 10).unwrap()[0].id;
+        cache.set_favorite(id, true).unwrap();
+        cache.put("second", &result()).unwrap();
+        cache.backup_to(&backup_path).unwrap();
+        let restored = TranslationCache::open(&backup_path).unwrap();
+        assert_eq!(restored.len().unwrap(), 2);
+        assert_eq!(
+            restored.history("", true, 10).unwrap()[0].source_text,
+            historical.source_text
+        );
+        assert_eq!(restored.history("", true, 10).unwrap()[0].id, id);
+        assert!(cache.backup_to(&backup_path).is_err());
+        cache.put("after-backup", &result()).unwrap();
+        assert_eq!(cache.len().unwrap(), 3);
+        assert_eq!(restored.len().unwrap(), 2);
+        drop(cache);
+        drop(restored);
+        assert_eq!(TranslationCache::open(&path).unwrap().len().unwrap(), 3);
     }
 }

@@ -1,6 +1,8 @@
 # QuickTranslate
 
-QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 OCR 翻译工具。它常驻系统托盘：选中文字后按 `Alt + Q` 可划词翻译，按 `Alt + W` 可框选屏幕区域并识别后翻译。OCR 默认使用 Windows 内置能力，也可切换到可选的 PP-OCRv6 Small 本地插件或自备 API Key 的云端视觉模型。
+源码版本：**v1.2.0**。本轮新增离线朗读、分段双语跟读和用户确认式签名更新。下面的一键下载命令指向已发布的 **v1.0.0**；v1.2.0 发布后再更换固定下载地址和 SHA-256，不使用尚未发布的链接。
+
+QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 OCR 翻译工具。它常驻系统托盘：选中文字后按 `Alt + Q` 可划词翻译，按 `Alt + W` 可框选屏幕区域并识别后翻译。v1.2.0 新安装默认推荐自备 API Key 的云端 OCR；Windows OCR 与 PP-OCRv6 Small 本地插件作为显式可选的离线替代。升级保留用户原有引擎选择，已发布 v1.0.0 的默认引擎仍为 Windows OCR。
 
 > 截图占位：`docs/screenshots/popup.png`、`docs/screenshots/settings.png`
 
@@ -23,9 +25,9 @@ Remove-Item $installer -Force
 - 系统托盘：翻译、设置、退出
 - 可修改的全局快捷键（默认 `Alt + Q`）
 - 独立 OCR 快捷键（默认 `Alt + W`），支持 Windows OCR、PP-OCRv6 Small 和云端视觉 OCR 三种方案
-- Windows OCR 默认启用：无需额外下载，并自动放大小字、比较原图与增强图的识别结果
+- Windows OCR 为离线替代：无需额外下载，并自动放大小字、比较原图与增强图的识别结果
 - PP-OCRv6 Small 为可选本地插件：设置页一键下载/卸载约 29.8 MiB 官方模型，并在启用前校验固定大小和 SHA-256
-- 云端视觉 OCR 为可选 BYOK 配置：独立 Base URL、模型和 API Key，不与翻译 API Key 混用
+- 云端视觉 OCR 为 v1.2.0 新安装的推荐方案：需主动填写独立 Base URL、模型和 API Key，不与翻译 API Key 混用；未配置 Key 时不会上传截图
 - Windows 临时 `Ctrl + C` 选词，并尽可能恢复原剪贴板全部格式
 - 完全本地的中英文检测和文本清洗（最多 5000 字符）
 - OpenAI-compatible Provider（OpenAI、阿里云百炼、DeepSeek 与自定义端点预设）
@@ -124,9 +126,9 @@ git switch main
 
 | 方案 | 是否联网 | 配置方式 | 适合场景 |
 | --- | --- | --- | --- |
-| Windows OCR（默认） | 否 | 无需安装；可选择自动、简体中文或英文 | 日常文字、追求最轻量 |
+| 云端视觉 OCR（新安装默认推荐） | 是 | 用户自行填写 Base URL、模型和独立 API Key | 主要体验，对准确率要求较高 |
+| Windows OCR | 否 | 内置；可选择自动、简体中文或英文 | 云端不可用或不希望上传截图时的替代 |
 | PP-OCRv6 Small | 否 | 在设置页选择后点击“一键安装” | 小字、复杂排版、希望图片留在本机 |
-| 云端视觉 OCR | 是 | 用户自行填写 Base URL、模型和独立 API Key | 对准确率要求最高、可接受上传所选截图 |
 
 云端方案推荐阿里云百炼 `qwen3.5-ocr`：
 
@@ -136,12 +138,30 @@ git switch main
 
 云端 OCR 配置完全可选。只有明确选择“云端视觉 OCR”并按 `Alt + W` 框选后，所选截图才会发送到用户配置的服务商；Cloud OCR API Key 单独保存在 Windows Credential Manager。Windows OCR 若提示语言不可用，请在 Windows“语言和区域”中安装对应语言包。
 
+v1.2.0 新安装默认推荐云端，但未配置 Key 时不会请求云端。旧版本升级保留原有引擎选择，不会把离线用户自动改为云端；云端故障时可在设置手动改用 Windows OCR 或已安装的 PP-OCRv6 Small。
+
+### 离线朗读（v1.2.0）
+
+- 悬浮窗底部有“朗读原文”“朗读译文”“双语跟读”；再次点击从头重播，可暂停、继续或停止。
+- 分段播放并高亮当前段落；“双语跟读”按完整原文 → 完整译文顺序播放，不保证逐句对齐。
+- 设置里保存 0.5×–2× 语速、中英文系统音色，以及朗读原文后继续译文的偏好。
+- OCR 原文可编辑，朗读使用修正后的内容；修改后会提示重译，避免双语跟读使用过期译文。
+- 新翻译、编辑原文或隐藏悬浮窗会停止旧队列，连续点击不会叠音。
+- 朗读完全在本机运行，不需要 API。缺少音色时，在 Windows“时间和语言 → 语音”安装对应语音包，再重启应用。
+
+### 应用内更新（v1.2.0 起）
+
+设置 → 应用更新 → 检查更新 → 下载并校验 → 安装更新 → 确认安装。可取消下载，安装必须再次确认。签名或版本不符不会安装；安装前自动备份设置、悬浮窗尺寸和翻译历史，备份失败则阻止安装。
+
+v1.0.0 首次升级需手动下载安装包并覆盖安装，之后可使用应用内更新。API Key 保留在 Windows 凭据管理器。详见[更新、签名与迁移说明](docs/UPDATES.md)及[v1.2.0 发布说明](docs/releases/v1.2.0.md)。
+
 ## 检查与构建
 
 每次推送到 `main` 或提交 Pull Request 时，GitHub Actions 会在 Windows 环境自动执行前端构建、Rust 格式检查、Clippy 和测试。本地可运行同一组核心命令：
 
 ```powershell
 npm run build
+npm test
 cargo fmt --manifest-path .\src-tauri\Cargo.toml --all -- --check
 cargo clippy --manifest-path .\src-tauri\Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path .\src-tauri\Cargo.toml
@@ -206,10 +226,11 @@ docs/               发布检查清单与维护文档
 - PP-OCRv6 Small 首次启用需要下载约 29.8 MiB 模型，首次推理还需初始化本地 WebAssembly 运行时，因此会比后续识别慢。
 - 云端视觉 OCR 的可用性、费用、数据处理和限额由用户选择的服务商决定。
 - 悬浮窗高度为可调整的固定初始值，长原文或译文在窗口内部滚动。
-- 当前“检查更新”会定位并复制 GitHub Releases 下载页，不会绕过签名校验静默安装。
+- 应用内更新需要 Release 同时提供安装包、签名和 `latest.json`；v1.0.0 仅有下载页检查，需要手动首次升级。
+- Tauri 更新签名不等于 Windows 商业代码签名；安装器仍可能显示“未知发布者”。
 
 ## Roadmap
 
-1. macOS Accessibility / Linux selection clipboard 平台实现。
-2. 自动更新、设置迁移备份与发布签名。
-3. PP-OCRv6 Small 性能基准、更多语言模型及断点续传。
+1. 云端 OCR 配置测试、可恢复错误、重新框选/重试和智能图像压缩。
+2. 中英文段落对齐与术语表，改善截图到朗读的连续体验。
+3. 在受控 Windows 环境验证后续正式版完整在线升级，再评估商业代码签名。

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "provider": "阿里云百炼",
+  "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "model": "qwen-turbo",
+  "globalShortcut": "Control+Alt+Q",
+  "ocrShortcut": "Alt+W",
+  "ocrEngine": "cloud",
+  "ocrLanguage": "chinese",
+  "cloudOcrBaseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  "cloudOcrModel": "qwen3.5-ocr"
+}

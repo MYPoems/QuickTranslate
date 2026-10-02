@@ -4,7 +4,10 @@ import "./styles/global.css";
 const currentWindow = getCurrentWindow();
 const label = currentWindow.label;
 
-if (label === "settings") {
+if (label === "vocabulary") {
+  document.body.classList.add("vocabulary-window");
+  void import("./vocabulary/vocabulary").then(({mountVocabulary})=>mountVocabulary());
+} else if (label === "settings") {
   document.body.classList.add("settings-window");
   void import("./settings/settings").then(({ mountSettings }) => mountSettings());
 } else if (label === "history") {

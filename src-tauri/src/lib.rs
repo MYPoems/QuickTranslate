@@ -18,6 +18,8 @@ mod speech_cloud;
 mod speech_plugin;
 #[cfg(windows)]
 mod speech_worker;
+mod vocabulary;
+mod vocabulary_model;
 
 #[cfg(windows)]
 pub fn run_speech_worker() {
@@ -94,21 +96,40 @@ pub fn run() {
             app.global_shortcut()
                 .register(settings.ocr_shortcut.as_str())?;
             tray::setup(app)?;
+            if std::env::args().any(|arg| arg == "--vocabulary") {
+                window::show_vocabulary(app.handle());
+            }
             Ok(())
         })
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. }
-                if matches!(window.label(), "popup" | "settings" | "history" | "ocr") =>
+                if matches!(
+                    window.label(),
+                    "popup" | "settings" | "history" | "ocr" | "vocabulary"
+                ) =>
             {
                 api.prevent_close();
                 if window.label() == "popup" {
+                    window
+                        .app_handle()
+                        .state::<AppState>()
+                        .vocabulary_collection_open
+                        .store(false, std::sync::atomic::Ordering::Relaxed);
                     let _ = window.emit("popup-hidden", ());
+                }
+                if window.label() == "vocabulary" {
+                    let _ = window.emit("vocabulary-hidden", ());
                 }
                 let _ = window.hide();
             }
             tauri::WindowEvent::Focused(false)
                 if window.label() == "popup"
-                    && !window.app_handle().state::<AppState>().popup_pinned() =>
+                    && !window.app_handle().state::<AppState>().popup_pinned()
+                    && !window
+                        .app_handle()
+                        .state::<AppState>()
+                        .vocabulary_collection_open
+                        .load(std::sync::atomic::Ordering::Relaxed) =>
             {
                 let _ = window.emit("popup-hidden", ());
                 let _ = window.hide();
@@ -131,6 +152,22 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
+            commands::vocabulary::set_vocabulary_collection_open,
+            commands::vocabulary::open_vocabulary,
+            commands::vocabulary::list_vocabulary,
+            commands::vocabulary::get_vocabulary_entry,
+            commands::vocabulary::collect_vocabulary,
+            commands::vocabulary::generate_vocabulary,
+            commands::vocabulary::review_vocabulary,
+            commands::vocabulary::save_vocabulary_card,
+            commands::vocabulary::adopt_vocabulary_lemma,
+            commands::vocabulary::begin_vocabulary_quiz,
+            commands::vocabulary::submit_vocabulary_quiz,
+            commands::vocabulary::abandon_vocabulary_quiz,
+            commands::vocabulary::delete_vocabulary,
+            commands::vocabulary::set_vocabulary_rules,
+            commands::vocabulary::export_vocabulary,
+            commands::vocabulary::import_vocabulary,
             commands::speech::list_speech_voices,
             commands::speech::get_speech_preferences,
             commands::speech::stream_cloud_speech,

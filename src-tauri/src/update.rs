@@ -143,7 +143,10 @@ mod tests {
 
     #[test]
     fn installation_requires_confirmation_verified_bytes_and_exact_new_version() {
-        assert!(validate_install(&UpdatePhase::Ready, "1.3.0", "1.3.0", true, b"verified").is_ok());
+        let current = env!("CARGO_PKG_VERSION");
+        let major = current.split('.').next().unwrap().parse::<u64>().unwrap();
+        let next = format!("{}.0.0", major + 1);
+        assert!(validate_install(&UpdatePhase::Ready, &next, &next, true, b"verified").is_ok());
         for phase in [
             UpdatePhase::Available,
             UpdatePhase::Downloading,
@@ -151,11 +154,12 @@ mod tests {
             UpdatePhase::Error,
             UpdatePhase::Cancelled,
         ] {
-            assert!(validate_install(&phase, "1.3.0", "1.3.0", true, b"data").is_err());
+            assert!(validate_install(&phase, &next, &next, true, b"data").is_err());
         }
-        assert!(validate_install(&UpdatePhase::Ready, "1.3.0", "1.3.0", false, b"data").is_err());
-        assert!(validate_install(&UpdatePhase::Ready, "1.3.0", "1.4.0", true, b"data").is_err());
-        assert!(validate_install(&UpdatePhase::Ready, "1.3.0", "1.3.0", true, b"").is_err());
+        assert!(validate_install(&UpdatePhase::Ready, &next, &next, false, b"data").is_err());
+        assert!(validate_install(&UpdatePhase::Ready, &next, current, true, b"data").is_err());
+        assert!(validate_install(&UpdatePhase::Ready, &next, &next, true, b"").is_err());
+        assert!(validate_install(&UpdatePhase::Ready, current, current, true, b"data").is_err());
         assert!(validate_install(&UpdatePhase::Ready, "1.0.0", "1.0.0", true, b"data").is_err());
     }
 

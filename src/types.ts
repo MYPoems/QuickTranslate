@@ -11,6 +11,20 @@ export interface SpeechPreferences {
 export interface SpeechVoice { id: string; name: string; language: string }
 export interface SpeechAudio { audioDataUrl: string; voiceName: string }
 
+export interface WordExample { english:string; chinese:string }
+export interface WordQuiz { meaningPrompt:string; options:string[]; correctIndex:number; cloze:string; hint:string; answer:string }
+export interface WordCard { word:string; lemma:string; ipaUk:string; ipaUs:string; partOfSpeech:string; definitions:string[]; contextMeaning:string; examples:WordExample[]; collocations:string[]; quizzes:WordQuiz[] }
+export interface VocabularyEntry {
+  id:number; word:string; card:WordCard|null; sources:Array<{sentence:string;translation:string}>;
+  status:"new"|"review"|"test"|"mastered"; reviews:number; nextDueAt:number|null; studiedAt:number|null;
+  createdAt:number;updatedAt:number;revision:number;contentRevision:number;generationState:string;generationError:string|null;
+  model:string;provider:string;generatedAt:number|null;userEdited:boolean;activeQuiz:string|null;quizAttempts:number;
+}
+export interface VocabularyRules { intervalHours:number;dailyLimit:number }
+export interface VocabularyView { entries:VocabularyEntry[];total:number;due:number;tests:number;mastered:number;now:number;rules:VocabularyRules }
+export interface VocabularyQuizView { token:string;entryId:number;meaningPrompt:string;options:string[];cloze:string;hint:string }
+export interface VocabularyQuizResult { passed:boolean;meaningCorrect:boolean;spellingCorrect:boolean;entry:VocabularyEntry }
+
 export interface TranslationResult {
   sourceText: string;
   translation: string;

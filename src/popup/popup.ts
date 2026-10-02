@@ -4,6 +4,7 @@ import type { AppError, TranslationEvent, TranslationResult, SpeechPreferences }
 import { prepareSpeech, unlockSpeechAudio } from "../speech/stream";
 import { Reader, browserAudio, splitSpeech, defaultSpeech, type ReadSide, type ReaderState } from "../speech/reader";
 import "./popup.css";
+import {mountCollector} from "../vocabulary/collect";
 
 const root = document.querySelector<HTMLElement>("#app")!;
 let currentRequestId = 0;
@@ -53,6 +54,25 @@ export function mountPopup(): void {
   root.querySelector<HTMLButtonElement>("#copy")!.addEventListener("click", () => {
     void copyText(currentTranslation, "#copy");
   });
+  let selectedWord="";let selectionSource="";
+  const vocabTools=document.createElement("div");vocabTools.className="read-buttons vocabulary-tools";
+  vocabTools.innerHTML='<button id="collect-selected" class="text-button" type="button">收藏单词</button><button id="collect-batch" class="text-button" type="button">选取生词</button><button id="open-book" class="text-button" type="button">生词本</button>';
+  root.querySelector(".reading-tools")!.append(vocabTools);
+  const collector=mountCollector(root,()=>({source:selectionSource||[currentSource,currentTranslation].join("\n"),translation:selectionSource===currentTranslation?currentSource:currentTranslation}),true);
+  document.addEventListener("selectionchange",()=>{
+    const active=document.activeElement;
+    let selected="";
+    if(active instanceof HTMLTextAreaElement && active.classList.contains("recognized-text")){selected=active.value.slice(active.selectionStart,active.selectionEnd);selectionSource=currentSource;}
+    else {const selection=window.getSelection();const parent=selection?.anchorNode?.parentElement;if(parent && root.contains(parent)){selected=selection!.toString();selectionSource=parent.closest(".translation")?currentTranslation:currentSource;}}
+    selectedWord=selected.trim();if(!selectedWord && /^[A-Za-z]+(?:['’-][A-Za-z]+)*$/.test(currentSource.trim())){selectedWord=currentSource.trim();selectionSource=currentSource;}
+    root.querySelector<HTMLButtonElement>("#collect-selected")!.textContent=selectedWord.length<=48 && selectedWord?`收藏 ${selectedWord}`:"收藏单词";
+  });
+  root.querySelector("#collect-selected")!.addEventListener("mousedown",e=>e.preventDefault());
+  root.querySelector("#collect-selected")!.addEventListener("click",()=>void collector.open(selectedWord||(/^[A-Za-z]+(?:['’-][A-Za-z]+)*$/.test(currentSource.trim())?currentSource.trim():"")).catch(()=>{}));
+  root.querySelector("#collect-batch")!.addEventListener("click",()=>{selectionSource="";void collector.open("",true).catch(()=>{});});
+  root.querySelector("#open-book")!.addEventListener("click",()=>void invoke("open_vocabulary"));
+  void listen("speech-stop",({payload})=>{if(payload!=="popup"){readStart++;reader.stop();}});
+  void listen("popup-hidden",collector.close);
   root.querySelector<HTMLButtonElement>("#copy-source")!.addEventListener("click", () => {
     void copyText(currentSource, "#copy-source");
   });
@@ -71,7 +91,7 @@ export function mountPopup(): void {
   document.addEventListener("visibilitychange", () => { if (document.hidden) stopReading(); });
   void listen("popup-hidden", stopReading);
   window.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") void hide();
+    if (event.key === "Escape") {if(collector.dialog.open){collector.close();return;}void hide();}
     if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "c" && currentSource) {
       event.preventDefault();
       void copyText(currentSource, "#copy-source");
@@ -84,7 +104,7 @@ export function mountPopup(): void {
     }
   });
   void invoke<boolean>("get_popup_pinned").then(updatePin);
-  void listen<TranslationEvent>("translation-state", ({ payload }) => render(payload)).then(() => emit("popup-ready"));
+  void listen<TranslationEvent>("translation-state", ({ payload }) => {if(payload.status==="loading"){collector.close();selectedWord="";selectionSource="";}render(payload);}).then(() => emit("popup-ready"));
 }
 
 function render(event: TranslationEvent): void {

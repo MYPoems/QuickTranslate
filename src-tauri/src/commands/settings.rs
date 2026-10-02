@@ -1,5 +1,5 @@
 use serde::Serialize;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_autostart::ManagerExt as AutostartManagerExt;
 use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
@@ -167,6 +167,7 @@ pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsV
         )?;
         state.settings.replace(candidate)?;
         state.cloud_speech.stop();
+        let _ = app.emit("speech-stop", "settings");
         state.cloud_speech.clear_cache();
         state.speech_plugin.stop_synthesis();
         Ok(())

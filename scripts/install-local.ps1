@@ -1,6 +1,7 @@
 param(
     [string]$Installer,
-    [Parameter(Mandatory = $true)][string]$ExpectedSha256
+    [Parameter(Mandatory = $true)][string]$ExpectedSha256,
+    [switch]$OpenVocabulary
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -24,7 +25,7 @@ try {
     New-Item -ItemType Directory -Path $dataBackup | Out-Null
     if (Test-Path -LiteralPath $dataRoot) {
         # Include SQLite WAL/SHM as a closed-process snapshot; leave keys in Credential Manager.
-        Get-ChildItem -LiteralPath $dataRoot -File | Where-Object { $_.Name -like 'settings*.json*' -or $_.Name -eq 'popup-window.json' -or $_.Name -like 'translations.sqlite3*' } | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $dataBackup }
+        Get-ChildItem -LiteralPath $dataRoot -File | Where-Object { $_.Name -like 'settings*.json*' -or $_.Name -eq 'popup-window.json' -or $_.Name -like 'translations.sqlite3*' -or $_.Name -like 'vocabulary.sqlite3*' } | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $dataBackup }
     }
     'Closed-process application/settings/history backup' | Set-Content -LiteralPath (Join-Path $backupRoot 'COMPLETE.txt')
 } catch {
@@ -34,6 +35,6 @@ try {
 $installerProcess = Start-Process -FilePath $installerPath -ArgumentList '/S' -WindowStyle Hidden -PassThru -Wait
 if ($installerProcess.ExitCode -ne 0) { throw "安装失败，退出码 $($installerProcess.ExitCode)。保留备份：$backupRoot" }
 if (!(Test-Path -LiteralPath $installedExe)) { throw "安装器返回成功但未找到预期应用。保留备份：$backupRoot" }
-if (!(Get-Process quicktranslate -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $installedExe })) { Start-Process -FilePath $installedExe -WindowStyle Hidden }
+if (!(Get-Process quicktranslate -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $installedExe })) { if ($OpenVocabulary) { Start-Process -FilePath $installedExe -ArgumentList '--vocabulary' -WindowStyle Hidden } else { Start-Process -FilePath $installedExe -WindowStyle Hidden } }
 Write-Host "Installed: $installedExe"
 Write-Host "Backup: $backupRoot"

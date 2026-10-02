@@ -45,6 +45,7 @@ pub fn finish_backup(snapshot: &Path) -> Result<(), AppError> {
         "settings.json",
         "popup-window.json",
         "translations.sqlite3",
+        "vocabulary.sqlite3",
         "manifest.json",
     ] {
         fs::OpenOptions::new()
@@ -85,6 +86,51 @@ mod tests {
         cache
             .backup_to(&snapshot.join("translations.sqlite3"))
             .unwrap();
+        let book =
+            crate::vocabulary::VocabularyStore::open(&directory.path().join("vocabulary.sqlite3"))
+                .unwrap();
+        let word = book
+            .collect(
+                "architecture",
+                "She studies architecture.",
+                "",
+                1_780_000_000,
+            )
+            .unwrap();
+        let word = book
+            .save_card(
+                word.id,
+                word.revision,
+                crate::vocabulary::fixture_card("architecture"),
+                1_780_000_000,
+            )
+            .unwrap();
+        let word = book
+            .review(
+                word.id,
+                word.revision,
+                "upgrade-study",
+                "study",
+                1_780_000_000,
+            )
+            .unwrap();
+        let word = book
+            .review(
+                word.id,
+                word.revision,
+                "upgrade-review",
+                "remember",
+                1_780_014_400,
+            )
+            .unwrap();
+        book.backup_to(&snapshot.join("vocabulary.sqlite3"))
+            .unwrap();
+        let restored =
+            crate::vocabulary::VocabularyStore::open(&snapshot.join("vocabulary.sqlite3")).unwrap();
+        assert_eq!(
+            serde_json::to_value(restored.get(word.id).unwrap()).unwrap(),
+            serde_json::to_value(word).unwrap()
+        );
         finish_backup(&snapshot).unwrap();
         assert!(snapshot.join("COMPLETE").exists());
         assert_eq!(

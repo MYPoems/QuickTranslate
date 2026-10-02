@@ -160,7 +160,8 @@ pub fn cancel_speech_plugin_install(app: AppHandle) -> Result<(), AppError> {
     app.state::<AppState>().speech_plugin.cancel()
 }
 #[tauri::command]
-pub fn stop_speech(app: AppHandle) {
+pub fn stop_speech(app: AppHandle, window: tauri::Window) {
+    let _ = app.emit("speech-stop", window.label());
     app.state::<AppState>().speech_plugin.stop_synthesis();
     app.state::<AppState>().cloud_speech.stop();
 }

@@ -32,8 +32,11 @@ pub struct AppState {
     pub speech_plugin: Arc<crate::speech_plugin::SpeechPlugin>,
     pub cloud_speech: Arc<crate::speech_cloud::CloudSpeech>,
     pub popup_size: Arc<PopupSizeStore>,
+    pub vocabulary: Arc<crate::vocabulary::VocabularyStore>,
+    pub vocabulary_generation: tokio::sync::Semaphore,
     latest_request: AtomicU64,
     popup_pinned: AtomicBool,
+    pub vocabulary_collection_open: AtomicBool,
     active_request: Mutex<CancellationToken>,
     last_error: RwLock<Option<DiagnosticError>>,
 }
@@ -74,6 +77,10 @@ impl AppState {
         let cache_path = data_dir.join("translations.sqlite3");
         let ocr_plugin_dir = crate::ocr::plugin::plugin_dir(&data_dir);
         let cache = Arc::new(TranslationCache::open(&cache_path)?);
+        let vocabulary = Arc::new(crate::vocabulary::VocabularyStore::open(
+            &data_dir.join("vocabulary.sqlite3"),
+        )?);
+        vocabulary.recover_interrupted()?;
         let client = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(30))
@@ -91,8 +98,11 @@ impl AppState {
             speech_plugin: Arc::new(crate::speech_plugin::SpeechPlugin::new(&data_dir)),
             cloud_speech: Arc::new(crate::speech_cloud::CloudSpeech::default()),
             popup_size,
+            vocabulary,
+            vocabulary_generation: tokio::sync::Semaphore::new(2),
             latest_request: AtomicU64::new(0),
             popup_pinned: AtomicBool::new(false),
+            vocabulary_collection_open: AtomicBool::new(false),
             active_request: Mutex::new(CancellationToken::new()),
             last_error: RwLock::new(None),
         })

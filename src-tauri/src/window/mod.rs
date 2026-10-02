@@ -9,6 +9,21 @@ use crate::{app::AppState, platform};
 
 static OCR_OVERLAY_HAS_FOCUS: AtomicBool = AtomicBool::new(false);
 
+pub fn show_vocabulary(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("vocabulary") {
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+    let _ = WebviewWindowBuilder::new(app, "vocabulary", WebviewUrl::App("index.html".into()))
+        .title("QuickTranslate 生词本")
+        .inner_size(980.0, 730.0)
+        .min_inner_size(620.0, 500.0)
+        .resizable(true)
+        .center()
+        .build();
+}
+
 pub fn show_popup(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("popup") {
         apply_remembered_popup_size(app, &window);

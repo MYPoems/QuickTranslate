@@ -254,9 +254,13 @@ pub async fn install_update(
             .translation
             .backup_cache(snapshot.join("translations.sqlite3"))
             .await?;
-        tokio::task::spawn_blocking(move || crate::upgrade::finish_backup(&snapshot))
-            .await
-            .map_err(update_error)??;
+        let vocabulary = state.vocabulary.clone();
+        tokio::task::spawn_blocking(move || {
+            vocabulary.backup_to(&snapshot.join("vocabulary.sqlite3"))?;
+            crate::upgrade::finish_backup(&snapshot)
+        })
+        .await
+        .map_err(update_error)??;
         tokio::task::spawn_blocking(move || candidate.install(&bytes).map_err(update_error))
             .await
             .map_err(update_error)?

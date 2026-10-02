@@ -11,6 +11,26 @@ class FakeAudio implements AudioPlayer {
   end() { this.playing = false; this.onended?.(); }
 }
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
+test("cloud is default and first sentence stays short for responsive startup", () => {
+  assert.equal(defaultSpeech.provider, "cloud");
+  const segments = splitSpeech("这是第一句。" + "接下来的正文，".repeat(100), "source");
+  assert.equal(segments[0].text, "这是第一句。");
+  assert.ok(segments.slice(1).every(segment => Array.from(segment.text).length <= 160));
+});
+test("lookahead synthesizes during playback without overlapping players", async () => {
+  const { reader, players, voices } = setup();
+  const completion = reader.read(splitSpeech("first\nsecond\nthird", "source"), defaultSpeech);
+  await tick(); assert.equal(voices.length, 2); assert.equal(players.length, 1);
+  players[0].end(); await tick(); assert.equal(voices.length, 3); assert.equal(players.length, 2);
+  players[1].end(); await tick(); players[2].end(); await completion;
+});
+test("prefetch failure is handled and only reported when its turn arrives", async () => {
+  const player = new FakeAudio(); const states: ReaderState[] = []; let calls = 0;
+  const reader = new Reader(async () => { if (++calls > 1) throw new Error("prefetch failed"); return { audioDataUrl: "test", voiceName: "test" }; }, () => player, state => states.push(state));
+  const completion = reader.read(splitSpeech("one\ntwo", "source"), defaultSpeech);
+  await tick(); assert.equal(states.at(-1)?.status, "playing"); player.end(); await completion;
+  assert.equal(states.at(-1)?.message, "prefetch failed");
+});
 function setup() {
   const players: FakeAudio[] = [], states: ReaderState[] = [], voices: string[] = [];
   const reader = new Reader(async (_segment, voice) => { voices.push(voice); return { audioDataUrl: "data:audio/wav;base64,test", voiceName: "test" }; }, () => { const player = new FakeAudio(); players.push(player); return player; }, state => states.push(state));

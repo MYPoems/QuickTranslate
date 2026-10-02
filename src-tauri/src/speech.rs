@@ -2,9 +2,23 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::AppError;
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SpeechProvider {
+    #[default]
+    Cloud,
+    Offline,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct SpeechPreferences {
+    pub provider: SpeechProvider,
+    pub cloud_endpoint: String,
+    pub cloud_model: String,
+    pub cloud_chinese_voice: String,
+    pub cloud_english_voice: String,
+    pub threads: u16,
     pub rate: u16,
     pub chinese_voice: String,
     pub english_voice: String,
@@ -14,6 +28,12 @@ pub struct SpeechPreferences {
 impl Default for SpeechPreferences {
     fn default() -> Self {
         Self {
+            provider: SpeechProvider::Cloud,
+            cloud_endpoint: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime".into(),
+            cloud_model: "qwen3-tts-flash-realtime".into(),
+            cloud_chinese_voice: "Cherry".into(),
+            cloud_english_voice: "Cherry".into(),
+            threads: 4,
             rate: 100,
             chinese_voice: String::new(),
             english_voice: String::new(),
@@ -24,6 +44,26 @@ impl Default for SpeechPreferences {
 
 impl SpeechPreferences {
     pub fn validate(&self) -> Result<(), AppError> {
+        crate::speech_cloud::validate_endpoint(&self.cloud_endpoint)?;
+        if !self.cloud_model.starts_with("qwen3-tts-")
+            || self.cloud_model.len() > 128
+            || !self.cloud_model.ends_with("realtime") && !self.cloud_model.contains("realtime-")
+        {
+            return Err(AppError::Settings("请选择 Qwen3-TTS Realtime 模型".into()));
+        }
+        for voice in [&self.cloud_chinese_voice, &self.cloud_english_voice] {
+            if voice.is_empty()
+                || voice.len() > 128
+                || !voice
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+            {
+                return Err(AppError::Settings("云端音色名称无效".into()));
+            }
+        }
+        if !(1..=8).contains(&self.threads) {
+            return Err(AppError::Settings("离线语音线程数必须在 1–8 之间".into()));
+        }
         if !(50..=200).contains(&self.rate) {
             return Err(AppError::Settings("朗读语速必须在 50%–200% 之间".into()));
         }
@@ -42,7 +82,7 @@ pub struct SpeechVoice {
     pub language: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeechAudio {
     pub audio_data_url: String,
@@ -203,6 +243,7 @@ mod tests {
             chinese_voice: "zh-voice".into(),
             english_voice: "en-voice".into(),
             bilingual: true,
+            ..SpeechPreferences::default()
         };
         custom.validate().unwrap();
         assert_eq!(

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
-import type { AppError, TranslationEvent, TranslationResult, SettingsView, SpeechAudio } from "../types";
+import type { AppError, TranslationEvent, TranslationResult, SpeechPreferences } from "../types";
+import { prepareSpeech, unlockSpeechAudio } from "../speech/stream";
 import { Reader, browserAudio, splitSpeech, defaultSpeech, type ReadSide, type ReaderState } from "../speech/reader";
 import "./popup.css";
 
@@ -12,7 +13,7 @@ let currentTranslation = "";
 let currentSourceKind: "selection" | "ocr" = "selection";
 let pinned = false;
 let translationStale = false;
-const reader = new Reader((segment, voiceId) => invoke<SpeechAudio>("synthesize_speech", { text: segment.text, language: segment.language, voiceId }), browserAudio, renderReading);
+const reader = new Reader(prepareSpeech, browserAudio, renderReading);
 let readStart = 0;
 
 export function mountPopup(): void {
@@ -302,10 +303,11 @@ function refreshReadingButtons(): void {
 }
 function stopReading(): void { readStart++; reader.stop(); void invoke("stop_speech").catch(() => {}); }
 async function startReading(side: ReadSide | "both"): Promise<void> {
+  unlockSpeechAudio();
   stopReading();
   const start = readStart;
   let preferences = defaultSpeech;
-  try { preferences = (await invoke<SettingsView>("get_settings")).speech; }
+  try { await invoke("stop_speech"); preferences = await invoke<SpeechPreferences>("get_speech_preferences"); }
   catch (error) { if (start === readStart) renderReading({ status: "error", message: normalizeError(error).message }); return; }
   if (start !== readStart) return;
   const source = splitSpeech(currentSource, "source");
@@ -324,6 +326,7 @@ function appendReadingSegments(container: HTMLElement, text: string, side: ReadS
   }
 }
 function renderReading(state: ReaderState): void {
+  if (state.status === "error") void invoke("stop_speech").catch(() => {});
   const playback = root.querySelector<HTMLElement>("#playback");
   if (!playback) return;
   playback.hidden = state.status === "idle";

@@ -18,6 +18,7 @@ import "./settings.css";
 const root = document.querySelector<HTMLElement>("#app")!;
 let apiKeyConfigured = false;
 let cloudOcrApiKeyConfigured = false;
+let cloudSpeechApiKeyConfigured = false;
 let paddleOcrInstalled = false;
 let updateState: UpdateProgress = { phase: "idle", version: "", downloaded: 0, message: "", releaseNotes: "" };
 let formBusy = false;
@@ -104,15 +105,32 @@ export function mountSettings(): void {
           </div>
         </section>
         <section class="ocr-card speech-card">
-          <strong>离线朗读</strong>
+          <strong>朗读</strong>
+          <label>朗读方案<select name="speechProvider"><option value="cloud">云端流式朗读（默认，需 API Key）</option><option value="offline">离线朗读（Windows / Kokoro 插件）</option></select></label>
+          <div id="cloud-speech-options" class="ocr-options">
+            <p class="privacy-warning">只有你主动点击朗读时，才会把朗读文字上传至阿里云并产生语音合成费用。未配置 Key 或连接失败时明确提示，不自动切换服务。北京参考价 1 元 / 万字符，以控制台为准。</p>
+            <label>云端朗读地域 / WebSocket 地址<select name="cloudSpeechEndpoint"><option value="wss://dashscope.aliyuncs.com/api-ws/v1/realtime">北京（中国内地 Key）</option><option value="wss://dashscope-intl.aliyuncs.com/api-ws/v1/realtime">新加坡（国际 Key）</option></select></label>
+            <label>云端语音模型<input name="cloudSpeechModel" value="qwen3-tts-flash-realtime" required /></label>
+            <label>云端中文音色<input name="cloudChineseVoice" value="Cherry" required /></label>
+            <label>云端英文音色<input name="cloudEnglishVoice" value="Cherry" required /></label>
+            <p>默认 Cherry，同一音色支持中英文。可填写官方支持的音色 ID。</p>
+            <label>云端朗读 API Key<input name="cloudSpeechApiKey" type="password" autocomplete="off" placeholder="独立保存；留空不修改，不自动复用 OCR / 翻译 Key" /></label>
+            <p id="speech-key-status" class="key-status"></p>
+            <label class="checkbox-row"><input name="clearCloudSpeechApiKey" type="checkbox" />删除已保存的云端朗读 API Key</label>
+            <div class="cloud-help"><button id="test-cloud-speech" type="button" class="secondary">测试云端朗读连接</button><button id="copy-speech-key-url" type="button" class="secondary">复制 API 申请网址</button></div>
+            <p>测试会合成一条短句并显示首音频耗时，可能产生少量费用；不会保存未保存的表单。</p>
+          </div>
+          <div id="offline-speech-options" class="ocr-options" hidden>
           <p>系统音色和可选中英文插件均离线运行，不上传文字、不需要 API。插件无需管理员权限。</p>
           <div class="plugin-row"><div><strong>Kokoro 中英文音色插件</strong><p id="speech-plugin-status" role="status">正在读取插件状态…</p><progress id="speech-plugin-progress" hidden></progress></div><button id="toggle-speech-plugin" type="button" class="secondary">一键安装中英文音色</button><button id="cancel-speech-plugin" type="button" class="secondary" hidden>取消下载</button></div>
-          <p>首次下载约 164 MiB，含精选中文女声、男声和美式/英式英文音色；自动校验后启用。系统音色不可用时自动选择已安装插件；也可在下方明确选择插件音色。插件首次合成较慢。</p>
-          <label>语速<select name="speechRate"><option value="50">0.5×</option><option value="75">0.75×</option><option value="85">0.85×</option><option value="100">1×</option><option value="125">1.25×</option><option value="150">1.5×</option><option value="175">1.75×</option><option value="200">2×</option></select></label>
+          <p>首次下载约 164 MiB，含精选中英文音色；完整性验证后启用。离线自动选择优先使用系统音色，不可用时使用插件。插件模型首次加载后复用，闲置 5 分钟释放。</p>
+          <label>插件 CPU 线程数<select name="speechThreads"><option value="2">2（较低 CPU 占用）</option><option value="4">4（默认）</option><option value="6">6（需实测性能）</option><option value="8">8（需实测性能）</option></select></label>
           <label>中文音色<select name="chineseVoice"><option value="">自动选择中文音色</option></select></label>
           <label>英文音色<select name="englishVoice"><option value="">自动选择英文音色</option></select></label>
-          <label class="checkbox-row"><input name="bilingual" type="checkbox" />朗读原文后继续朗读译文</label>
           <p id="voice-status" role="status">正在读取系统音色…</p>
+          </div>
+          <label class="checkbox-row"><input name="bilingual" type="checkbox" />朗读原文后继续朗读译文</label>
+          <label>语速<select name="speechRate"><option value="50">0.5×</option><option value="75">0.75×</option><option value="85">0.85×</option><option value="100">1×</option><option value="125">1.25×</option><option value="150">1.5×</option><option value="175">1.75×</option><option value="200">2×</option></select></label>
         </section>
         <div class="preference-card">
           <label class="checkbox-row"><input name="autoStartEnabled" type="checkbox" />开机自动启动</label>
@@ -168,6 +186,9 @@ export function mountSettings(): void {
     </section>`;
 
   const form = root.querySelector<HTMLFormElement>("#settings-form")!;
+  (form.elements.namedItem("speechProvider") as HTMLSelectElement).addEventListener("change", () => refreshSpeechPanels(form));
+  root.querySelector("#copy-speech-key-url")!.addEventListener("click", () => void copyCloudKeyUrl());
+  root.querySelector("#test-cloud-speech")!.addEventListener("click", () => void testCloudSpeech(form));
   root.querySelector("#toggle-speech-plugin")!.addEventListener("click", () => void toggleSpeechPlugin(form));
   root.querySelector("#cancel-speech-plugin")!.addEventListener("click", () => void invoke("cancel_speech_plugin_install").catch(error => setStatus(errorMessage(error), "error")));
   void listen<SpeechPluginStatus>("speech-plugin-progress", ({ payload }) => renderSpeechPlugin(payload)).then(() => invoke<SpeechPluginStatus>("get_speech_plugin_status")).then(renderSpeechPlugin).catch(error => { root.querySelector("#speech-plugin-status")!.textContent = errorMessage(error); });
@@ -240,6 +261,8 @@ async function load(form: HTMLFormElement): Promise<void> {
     await loadVoices(form, settings.speech);
     apiKeyConfigured = settings.apiKeyConfigured;
     cloudOcrApiKeyConfigured = settings.cloudOcrApiKeyConfigured;
+    cloudSpeechApiKeyConfigured = settings.cloudSpeechApiKeyConfigured;
+    refreshSpeechPanels(form);
     paddleOcrInstalled = settings.paddleOcrInstalled;
     updateKeyStatus(settings.apiKeyConfigured, isLocalBaseUrl(settings.baseUrl));
     updateCloudKeyStatus();
@@ -265,9 +288,13 @@ async function save(form: HTMLFormElement): Promise<void> {
     (form.elements.namedItem("clearApiKey") as HTMLInputElement).checked = false;
     (form.elements.namedItem("cloudOcrApiKey") as HTMLInputElement).value = "";
     (form.elements.namedItem("clearCloudOcrApiKey") as HTMLInputElement).checked = false;
+    (form.elements.namedItem("cloudSpeechApiKey") as HTMLInputElement).value = "";
+    setCheckbox(form, "clearCloudSpeechApiKey", false);
     setCheckbox(form, "autoStartEnabled", settings.autoStartEnabled);
     apiKeyConfigured = settings.apiKeyConfigured;
     cloudOcrApiKeyConfigured = settings.cloudOcrApiKeyConfigured;
+    cloudSpeechApiKeyConfigured = settings.cloudSpeechApiKeyConfigured;
+    refreshSpeechPanels(form);
     paddleOcrInstalled = settings.paddleOcrInstalled;
     updateKeyStatus(settings.apiKeyConfigured, isLocalBaseUrl(settings.baseUrl));
     updateCloudKeyStatus();
@@ -386,6 +413,7 @@ async function importSettings(form: HTMLFormElement): Promise<void> {
     setInput(form, "cloudOcrModel", backup.cloudOcrModel);
     setCheckbox(form, "autoStartEnabled", backup.autoStartEnabled);
     await loadVoices(form, backup.speech || defaultSpeech);
+    refreshSpeechPanels(form);
     refreshKeyStatus(form);
     refreshOcrPanels(form);
     setStatus("备份已载入表单，请确认后点击保存", "success");
@@ -421,7 +449,7 @@ function formValue(form: HTMLFormElement): UpdateSettings {
   const apiKey = String(data.get("apiKey") || "").trim();
   const cloudOcrApiKey = String(data.get("cloudOcrApiKey") || "").trim();
   return {
-    speech: { rate: Number(data.get("speechRate") || 100), chineseVoice: String(data.get("chineseVoice") || ""), englishVoice: String(data.get("englishVoice") || ""), bilingual: data.get("bilingual") === "on" },
+    speech: { provider: String(data.get("speechProvider") || "cloud") as "cloud" | "offline", cloudEndpoint: String(data.get("cloudSpeechEndpoint") || defaultSpeech.cloudEndpoint), cloudModel: String(data.get("cloudSpeechModel") || defaultSpeech.cloudModel).trim(), cloudChineseVoice: String(data.get("cloudChineseVoice") || "Cherry").trim(), cloudEnglishVoice: String(data.get("cloudEnglishVoice") || "Cherry").trim(), threads: Number(data.get("speechThreads") || 4), rate: Number(data.get("speechRate") || 100), chineseVoice: String(data.get("chineseVoice") || ""), englishVoice: String(data.get("englishVoice") || ""), bilingual: data.get("bilingual") === "on" },
     provider: String(data.get("provider") || "OpenAI Compatible"),
     baseUrl: String(data.get("baseUrl") || "").trim(),
     model: String(data.get("model") || "").trim(),
@@ -435,6 +463,8 @@ function formValue(form: HTMLFormElement): UpdateSettings {
     clearApiKey: data.get("clearApiKey") === "on",
     cloudOcrApiKey: cloudOcrApiKey || undefined,
     clearCloudOcrApiKey: data.get("clearCloudOcrApiKey") === "on",
+    cloudSpeechApiKey: String(data.get("cloudSpeechApiKey") || "").trim() || undefined,
+    clearCloudSpeechApiKey: data.get("clearCloudSpeechApiKey") === "on",
     autoStartEnabled: data.get("autoStartEnabled") === "on",
   };
 }
@@ -568,12 +598,21 @@ async function toggleSpeechPlugin(form: HTMLFormElement): Promise<void> {
 }
 
 async function loadVoices(form: HTMLFormElement, preferences = defaultSpeech): Promise<void> {
+  preferences = { ...defaultSpeech, ...preferences };
+  setInput(form, "speechProvider", preferences.provider);
+  setInput(form, "cloudSpeechEndpoint", preferences.cloudEndpoint);
+  setInput(form, "cloudSpeechModel", preferences.cloudModel);
+  setInput(form, "cloudChineseVoice", preferences.cloudChineseVoice);
+  setInput(form, "cloudEnglishVoice", preferences.cloudEnglishVoice);
+  setInput(form, "speechThreads", String(preferences.threads));
+  const threads = form.elements.namedItem("speechThreads") as HTMLSelectElement;
+  if (!threads.value) { threads.add(new Option(String(preferences.threads), String(preferences.threads))); threads.value = String(preferences.threads); }
   setInput(form, "speechRate", String(preferences.rate));
   const rates = form.elements.namedItem("speechRate") as HTMLSelectElement;
   if (!rates.value) { rates.add(new Option(`${preferences.rate / 100}×`, String(preferences.rate))); rates.value = String(preferences.rate); }
   setCheckbox(form, "bilingual", preferences.bilingual);
   let voices: SpeechVoice[] = [];
-  try { voices = await invoke<SpeechVoice[]>("list_speech_voices"); root.querySelector("#voice-status")!.textContent = `检测到 ${voices.length} 个系统音色；每段文字自动匹配中英文。`; }
+  try { voices = await invoke<SpeechVoice[]>("list_speech_voices"); root.querySelector("#voice-status")!.textContent = `检测到 ${voices.length} 个离线音色；每段文字自动匹配中英文。`; }
   catch (error) { root.querySelector("#voice-status")!.textContent = errorMessage(error); }
   for (const [name, language, saved] of [["chineseVoice", "zh", preferences.chineseVoice], ["englishVoice", "en", preferences.englishVoice]]) {
     const select = form.elements.namedItem(name) as HTMLSelectElement;
@@ -582,6 +621,20 @@ async function loadVoices(form: HTMLFormElement, preferences = defaultSpeech): P
     if (saved && !Array.from(select.options).some(option => option.value === saved)) select.add(new Option("已保存的音色（当前不可用，请重新选择）", saved));
     select.value = saved;
   }
+}
+function refreshSpeechPanels(form: HTMLFormElement): void {
+  const cloud = (form.elements.namedItem("speechProvider") as HTMLSelectElement).value === "cloud";
+  root.querySelector<HTMLElement>("#cloud-speech-options")!.hidden = !cloud;
+  root.querySelector<HTMLElement>("#offline-speech-options")!.hidden = cloud;
+  root.querySelector("#speech-key-status")!.textContent = cloudSpeechApiKeyConfigured ? "已安全保存云端朗读 API Key" : "尚未配置云端朗读 API Key；朗读前需配置，或选择离线方案";
+}
+async function testCloudSpeech(form: HTMLFormElement): Promise<void> {
+  setBusy(true); setStatus("正在测试云端朗读（会合成一条短句）…", "neutral");
+  try {
+    const timing = await invoke<{ firstAudioMs: number; totalMs: number; cached: boolean }>("test_cloud_speech", { update: formValue(form) });
+    setStatus(`云端朗读连接成功，首音频 ${timing.firstAudioMs} ms，合成总耗时 ${timing.totalMs} ms（不等于实际播放延迟）`, "success");
+  } catch (error) { setStatus(errorMessage(error), "error"); }
+  finally { setBusy(false); }
 }
 function renderUpdate(progress: UpdateProgress): void {
   updateState = progress;

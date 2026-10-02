@@ -7,11 +7,13 @@ import type { SettingsView, UpdateProgress, TranslationEvent } from "../src/type
 
 const settings: SettingsView = { provider: "阿里云百炼", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-turbo", globalShortcut: "Alt+Q", ocrShortcut: "Alt+W", ocrEngine: "cloud", ocrLanguage: "auto", cloudOcrBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", cloudOcrModel: "qwen3.5-ocr", apiKeyConfigured: false, cloudOcrApiKeyConfigured: false, paddleOcrInstalled: false, autoStartEnabled: false, speech: { ...defaultSpeech, rate: 85, chineseVoice: "zh-test", englishVoice: "removed-voice" } };
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
+settings.cloudSpeechApiKeyConfigured = false;
 async function settle() { for (let i = 0; i < 4; i++) await tick(); }
 
 async function mount(entry: "settings" | "popup") {
   const dom = new JSDOM('<main id="app"></main>', { url: "http://localhost/" });
   const globals = globalThis as unknown as Record<string, unknown>;
+  globals.AudioContext = class { async resume() {} };
   for (const name of ["window", "document", "HTMLElement", "HTMLInputElement", "HTMLSelectElement", "HTMLFormElement", "HTMLTextAreaElement", "FormData", "Option"]) globals[name] = (dom.window as unknown as Record<string, unknown>)[name];
   dom.window.HTMLElement.prototype.scrollIntoView = () => {};
   dom.window.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
@@ -25,6 +27,7 @@ async function mount(entry: "settings" | "popup") {
     async invoke(command: string, args: Record<string, unknown> = {}): Promise<unknown> {
       calls.push({ command, args });
       if (command === "get_settings") return settings;
+      if (command === "get_speech_preferences") return { ...settings.speech, provider: "offline" };
       if (command === "get_speech_plugin_status") return { installed: false, phase: "idle", downloaded: 0, downloadBytes: 171837079, version: "test", message: "" };
       if (command === "list_speech_voices") return [{ id: "zh-test", name: "Test Chinese", language: "zh-CN" }];
       if (command === "get_update_state") return update;
@@ -44,7 +47,7 @@ async function mount(entry: "settings" | "popup") {
   globals.__qa = qa;
   const result = await build({ entryPoints: [`src/${entry}/${entry}.ts`], bundle: true, write: false, format: "esm", platform: "browser", loader: { ".css": "empty" }, plugins: [{ name: "tauri-test-stub", setup(builder) {
     builder.onResolve({ filter: /^@tauri-apps\/api\// }, args => ({ path: args.path, namespace: "qa" }));
-    builder.onLoad({ filter: /.*/, namespace: "qa" }, () => ({ contents: "export const invoke = (...args) => globalThis.__qa.invoke(...args); export const listen = (...args) => globalThis.__qa.listen(...args); export const emit = (...args) => globalThis.__qa.emit(...args);" }));
+    builder.onLoad({ filter: /.*/, namespace: "qa" }, () => ({ contents: "export class Channel { onmessage = () => {}; } export const invoke = (...args) => globalThis.__qa.invoke(...args); export const listen = (...args) => globalThis.__qa.listen(...args); export const emit = (...args) => globalThis.__qa.emit(...args);" }));
   } }] });
   const module = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text + `\n//# sourceURL=quicktranslate-${entry}-test-${Math.random()}.js`).toString("base64")}`);
   module[entry === "settings" ? "mountSettings" : "mountPopup"]();
@@ -65,6 +68,21 @@ test("settings preserve installed/missing voices, rate and preference on save", 
     await settle();
     const save = calls.find(call => call.command === "save_settings")!;
     assert.deepEqual((save.args.update as { speech: unknown }).speech, { ...settings.speech, bilingual: true });
+  } finally { close(); }
+});
+test("cloud is default with explicit privacy notice, independent key and manual offline switch", async () => {
+  const { element, calls, close } = await mount("settings");
+  try {
+    assert.equal(element<HTMLSelectElement>('[name="speechProvider"]').value, "cloud");
+    assert.equal(element("#cloud-speech-options").hidden, false); assert.equal(element("#offline-speech-options").hidden, true);
+    assert.match(element("#cloud-speech-options").textContent || "", /上传.*费用/);
+    assert.match(element("#speech-key-status").textContent || "", /尚未配置/);
+    assert.equal(calls.some(call => call.command === "stream_cloud_speech" || call.command === "test_cloud_speech"), false);
+    const provider = element<HTMLSelectElement>('[name="speechProvider"]'); provider.value = "offline"; provider.dispatchEvent(new window.Event("change"));
+    assert.equal(element("#offline-speech-options").hidden, false);
+    element<HTMLFormElement>("form").dispatchEvent(new window.Event("submit", { cancelable: true })); await settle();
+    const update = calls.find(call => call.command === "save_settings")!.args.update as { speech: { provider: string; chineseVoice: string }; cloudSpeechApiKey?: string };
+    assert.equal(update.speech.provider, "offline"); assert.equal(update.speech.chineseVoice, "zh-test"); assert.equal(update.cloudSpeechApiKey, undefined);
   } finally { close(); }
 });
 

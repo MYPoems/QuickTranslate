@@ -7,6 +7,9 @@ pub trait SecretStore: Send + Sync {
     fn save_cloud_ocr_api_key(&self, value: &str) -> Result<(), AppError>;
     fn get_cloud_ocr_api_key(&self) -> Result<Option<String>, AppError>;
     fn delete_cloud_ocr_api_key(&self) -> Result<(), AppError>;
+    fn save_cloud_speech_api_key(&self, value: &str) -> Result<(), AppError>;
+    fn get_cloud_speech_api_key(&self) -> Result<Option<String>, AppError>;
+    fn delete_cloud_speech_api_key(&self) -> Result<(), AppError>;
 }
 
 pub fn provider_api_key(
@@ -29,6 +32,7 @@ impl KeyringSecretStore {
     const SERVICE: &'static str = "QuickTranslate";
     const USERNAME: &'static str = "openai-compatible-api-key";
     const CLOUD_OCR_USERNAME: &'static str = "cloud-ocr-api-key";
+    const CLOUD_SPEECH_USERNAME: &'static str = "cloud-speech-api-key";
 
     fn entry(username: &str) -> Result<keyring::Entry, AppError> {
         keyring::Entry::new(Self::SERVICE, username)
@@ -52,6 +56,17 @@ impl KeyringSecretStore {
 }
 
 impl SecretStore for KeyringSecretStore {
+    fn save_cloud_speech_api_key(&self, value: &str) -> Result<(), AppError> {
+        Self::entry(Self::CLOUD_SPEECH_USERNAME)?
+            .set_password(value)
+            .map_err(|error| AppError::Settings(error.to_string()))
+    }
+    fn get_cloud_speech_api_key(&self) -> Result<Option<String>, AppError> {
+        Self::read(Self::CLOUD_SPEECH_USERNAME)
+    }
+    fn delete_cloud_speech_api_key(&self) -> Result<(), AppError> {
+        Self::delete(Self::CLOUD_SPEECH_USERNAME)
+    }
     fn save_api_key(&self, value: &str) -> Result<(), AppError> {
         Self::entry(Self::USERNAME)?
             .set_password(value)

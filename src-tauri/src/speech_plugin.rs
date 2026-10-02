@@ -3,7 +3,6 @@ use crate::{
     errors::AppError,
     speech::{SpeechAudio, SpeechVoice},
 };
-use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
@@ -26,7 +25,22 @@ const PACKAGES: [(&str, &str, u64, &str); 2] = [
     ("model.tar.bz2", "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_1.tar.bz2", 147_031_220, "A1E94694776049035C4F2C6529F003AAECE993C76AAE9A78995831C3C4DCAFC6"),
 ];
 // Independently pinned executable, DLL and model hashes, never trusted from local metadata.
-const FILES: [(&str, u64, &str); 8] = [
+const FILES: [(&str, u64, &str); 11] = [
+    (
+        "sherpa-onnx-v1.13.8-win-x64-shared-MT-Release/lib/sherpa-onnx-c-api.dll",
+        4_605_952,
+        "300E0C88400903FC4CFC88BE88A8AE587A24CC658653E0E1FD1C2B8DBBC68557",
+    ),
+    (
+        "sherpa-onnx-v1.13.8-win-x64-shared-MT-Release/lib/onnxruntime.dll",
+        17_799_168,
+        "7F66F939A881BAF4F46A2216496798EDF4A1429878B646D12674AA62F27D8A25",
+    ),
+    (
+        "sherpa-onnx-v1.13.8-win-x64-shared-MT-Release/lib/onnxruntime_providers_shared.dll",
+        104_960,
+        "551D0E1FE4C227D8542314BA718D52F4379E0C7BFE729A37C59833A884E27B4D",
+    ),
     (
         "sherpa-onnx-v1.13.8-win-x64-shared-MT-Release/bin/sherpa-onnx-offline-tts.exe",
         2_768_896,
@@ -86,6 +100,10 @@ pub struct SpeechPlugin {
     progress: Mutex<PluginStatus>,
     cancel: Mutex<CancellationToken>,
     synthesis: Mutex<()>,
+    verified: Mutex<Option<Vec<(u64, std::time::SystemTime)>>>,
+    audio_cache: Mutex<crate::speech_cache::AudioCache<SpeechAudio>>,
+    #[cfg(windows)]
+    worker: Mutex<Option<crate::speech_worker::Worker>>,
     generation: AtomicU64,
 }
 fn error(message: impl std::fmt::Display) -> AppError {
@@ -104,18 +122,21 @@ impl SpeechPlugin {
             }),
             cancel: Mutex::new(CancellationToken::new()),
             synthesis: Mutex::new(()),
+            verified: Mutex::new(None),
+            audio_cache: Mutex::new(crate::speech_cache::AudioCache::new(24 * 1024 * 1024)),
+            #[cfg(windows)]
+            worker: Mutex::new(None),
             generation: AtomicU64::new(0),
         }
     }
     pub fn status(&self) -> Result<PluginStatus, AppError> {
         let mut status = self.progress.lock().map_err(error)?.clone();
-        // Full hashes before exposing voices; running synthesis checks again before execution.
-        status.installed = verified_root(&self.root).is_ok();
+        status.installed = self.verify_cached().is_ok();
         status.present = self.root.exists();
         Ok(status)
     }
     pub fn voices(&self) -> Vec<SpeechVoice> {
-        if verified_root(&self.root).is_ok() {
+        if self.verify_cached().is_ok() {
             plugin_voices()
         } else {
             Vec::new()
@@ -127,6 +148,29 @@ impl SpeechPlugin {
     }
     pub fn stop_synthesis(&self) {
         self.generation.fetch_add(1, Ordering::SeqCst);
+    }
+    fn verify_cached(&self) -> Result<bool, AppError> {
+        let stamps = FILES
+            .iter()
+            .map(|(name, size, _)| {
+                let metadata = fs::symlink_metadata(self.root.join(name)).map_err(error)?;
+                if !metadata.is_file()
+                    || metadata.file_type().is_symlink()
+                    || metadata.len() != *size
+                {
+                    return Err(error("插件文件大小或类型不匹配"));
+                }
+                Ok((metadata.len(), metadata.modified().map_err(error)?))
+            })
+            .collect::<Result<Vec<_>, AppError>>()?;
+        let mut verified = self.verified.lock().map_err(error)?;
+        if verified.as_ref() == Some(&stamps) {
+            return Ok(false);
+        }
+        verified_root(&self.root)?;
+        *verified = Some(stamps);
+        self.audio_cache.lock().map_err(error)?.clear();
+        Ok(true)
     }
     pub async fn install(
         self: Arc<Self>,
@@ -268,6 +312,12 @@ impl SpeechPlugin {
             .clone()
             .try_write_owned()
             .map_err(|_| error("请先停止朗读或取消安装并等待完成"))?;
+        #[cfg(windows)]
+        {
+            *self.worker.lock().map_err(error)? = None;
+        }
+        *self.verified.lock().map_err(error)? = None;
+        self.audio_cache.lock().map_err(error)?.clear();
         // This target is constructed only by new(), never from frontend input.
         if self.root.exists() {
             fs::remove_dir_all(&self.root).map_err(error)?;
@@ -280,105 +330,78 @@ impl SpeechPlugin {
         }
         self.status()
     }
-    #[cfg(windows)]
+    #[cfg(all(windows, test))]
     pub fn synthesize(
         &self,
         text: &str,
         voice: &str,
         language: &str,
     ) -> Result<SpeechAudio, AppError> {
-        use std::{
-            os::windows::process::CommandExt,
-            process::{Command, Stdio},
-        };
+        self.synthesize_with_threads(text, voice, language, 4)
+    }
+    #[cfg(windows)]
+    pub fn synthesize_with_threads(
+        &self,
+        text: &str,
+        voice: &str,
+        language: &str,
+        threads: u16,
+    ) -> Result<SpeechAudio, AppError> {
         let sid = speaker_id(voice, language)?;
-        if text.trim().is_empty() || text.chars().count() > 600 {
-            return Err(error("段落为空或超过 600 字符"));
+        if text.trim().is_empty() || text.chars().count() > 600 || !(1..=8).contains(&threads) {
+            return Err(error("朗读参数无效"));
         }
-        let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        let generation = self.generation.load(Ordering::SeqCst);
         let _guard = self
             .gate
             .clone()
             .try_read_owned()
             .map_err(|_| error("正在安装/卸载，请稍后朗读"))?;
         let _synthesis = self.synthesis.lock().map_err(error)?;
-        verified_root(&self.root)?;
+        let changed = self.verify_cached()?;
+        let mut worker = self.worker.lock().map_err(error)?;
+        if changed
+            || worker
+                .as_mut()
+                .is_some_and(|w| w.threads != threads || !w.is_alive())
+        {
+            *worker = None;
+        }
         if self.generation.load(Ordering::SeqCst) != generation {
             return Err(error("朗读已取消"));
         }
-        // Private short-lived WAV only; no OCR screenshots or user text saved to disk.
-        let output = tempfile::Builder::new()
-            .prefix(".speech-audio-")
-            .tempdir_in(&self.root)
-            .map_err(error)?;
-        let wav = output.path().join("audio.wav");
-        let relative = wav
-            .strip_prefix(&self.root)
-            .map_err(error)?
-            .to_string_lossy();
-        let mut command = Command::new(self.root.join(FILES[0].0));
-        command
-            .current_dir(&self.root)
-            .creation_flags(0x08000000)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .args([
-                "--print-args=false",
-                "--num-threads=4",
-                "--debug=false",
-                "--provider=cpu",
-            ])
-            .arg(format!("--kokoro-model={MODEL}/model.int8.onnx"))
-            .arg(format!("--kokoro-voices={MODEL}/voices.bin"))
-            .arg(format!("--kokoro-tokens={MODEL}/tokens.txt"))
-            .arg(format!("--kokoro-data-dir={MODEL}/espeak-ng-data"))
-            .arg(format!(
-                "--kokoro-lexicon={MODEL}/lexicon-us-en.txt,{MODEL}/lexicon-zh.txt"
-            ))
-            .arg(format!("--sid={sid}"))
-            .arg(format!("--output-filename={relative}"))
-            .arg("--")
-            .arg(text);
-        let mut child = command
-            .spawn()
-            .map_err(|_| error("无法启动离线语音运行时，请重新安装插件"))?;
-        let start = Instant::now();
-        loop {
-            if self.generation.load(Ordering::SeqCst) != generation {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(error("朗读已取消"));
+        let key = hex::encode(Sha256::digest(
+            format!("{VERSION}\0{threads}\0{sid}\0{text}").as_bytes(),
+        ));
+        if let Some(audio) = self.audio_cache.lock().map_err(error)?.get(&key) {
+            return Ok(audio);
+        }
+        if worker.is_none() {
+            *worker = Some(crate::speech_worker::Worker::start(&self.root, threads)?);
+        }
+        let result = worker
+            .as_mut()
+            .unwrap()
+            .synthesize(text, sid, &self.generation, generation);
+        match result {
+            Ok(mut audio) => {
+                audio.voice_name = plugin_voices()
+                    .into_iter()
+                    .find(|v| speaker_id(&v.id, language).ok() == Some(sid))
+                    .map(|v| v.name)
+                    .unwrap_or_else(|| "Kokoro 离线音色".into());
+                let size = audio.audio_data_url.len();
+                self.audio_cache
+                    .lock()
+                    .map_err(error)?
+                    .insert(key, audio.clone(), size);
+                Ok(audio)
             }
-            match child.try_wait() {
-                Ok(Some(status)) if status.success() => break,
-                Ok(Some(_)) => return Err(error("离线合成失败，请重试或改用系统音色")),
-                Ok(None) if start.elapsed() < Duration::from_secs(120) => {
-                    std::thread::sleep(Duration::from_millis(50))
-                }
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Err(error("离线合成超时，请缩短文字或改用系统音色"));
-                }
+            Err(err) => {
+                *worker = None;
+                Err(err)
             }
         }
-        if fs::metadata(&wav).map_err(error)?.len() > 16 * 1024 * 1024 {
-            return Err(error("生成音频超出大小限制"));
-        }
-        let bytes = fs::read(&wav).map_err(error)?;
-        if !valid_wav(&bytes) {
-            return Err(error("语音文件无效"));
-        }
-        let name = plugin_voices()
-            .into_iter()
-            .find(|v| v.id == voice)
-            .map(|v| v.name)
-            .unwrap_or_else(|| "Kokoro 离线音色".into());
-        Ok(SpeechAudio {
-            audio_data_url: format!("data:audio/wav;base64,{}", STANDARD.encode(bytes)),
-            voice_name: name,
-        })
     }
 }
 fn speaker_id(voice: &str, language: &str) -> Result<u16, AppError> {
@@ -429,7 +452,7 @@ fn file_hash(path: &Path) -> Result<String, AppError> {
     }
     Ok(hex::encode_upper(hash.finalize()))
 }
-fn verified_root(root: &Path) -> Result<(), AppError> {
+pub(crate) fn verified_root(root: &Path) -> Result<(), AppError> {
     for (name, size, hash) in FILES {
         let path = root.join(name);
         if !fs::symlink_metadata(&path)
@@ -484,6 +507,7 @@ fn extract_archive(path: &Path, dest: &Path, root: &str) -> Result<(), AppError>
     }
     Ok(())
 }
+#[cfg(test)]
 fn valid_wav(bytes: &[u8]) -> bool {
     bytes.len() > 44 && bytes.get(..4) == Some(b"RIFF") && bytes.get(8..12) == Some(b"WAVE")
 }
@@ -491,6 +515,44 @@ fn valid_wav(bytes: &[u8]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "uses installed plugin read-only and QUICKTRANSLATE_SPEECH_WORKER_EXE"]
+    fn installed_worker_reuses_model_caches_audio_and_cancels() {
+        let data = PathBuf::from(std::env::var_os("QUICKTRANSLATE_SPEECH_BENCH_DATA").unwrap());
+        let plugin = Arc::new(SpeechPlugin::new(&data));
+        assert!(plugin.status().unwrap().installed);
+        for (text, voice, language) in [
+            ("这是第一条语音测试。", "plugin:kokoro:3", "zh"),
+            ("这是第二条语音测试。", "plugin:kokoro:3", "zh"),
+            ("Hello from QuickTranslate.", "plugin:kokoro:0", "en"),
+        ] {
+            let start = Instant::now();
+            let audio = plugin.synthesize(text, voice, language).unwrap();
+            println!("{language} synthesis: {} ms", start.elapsed().as_millis());
+            assert!(audio
+                .audio_data_url
+                .starts_with("data:audio/wav;base64,UklGR"));
+        }
+        let start = Instant::now();
+        plugin
+            .synthesize("这是第一条语音测试。", "plugin:kokoro:3", "zh")
+            .unwrap();
+        println!("cached repeat: {} ms", start.elapsed().as_millis());
+        assert!(start.elapsed() < Duration::from_secs(1));
+        let next = plugin.clone();
+        let reading = std::thread::spawn(move || {
+            next.synthesize(
+                "这是一条需要取消的较长语音测试。".repeat(15).as_str(),
+                "plugin:kokoro:3",
+                "zh",
+            )
+        });
+        std::thread::sleep(Duration::from_millis(150));
+        plugin.stop_synthesis();
+        assert!(reading.join().unwrap().is_err());
+        assert!(plugin.worker.lock().unwrap().is_none());
+    }
     #[test]
     fn operation_guard_prevents_uninstall_during_reading() {
         let temp = tempfile::tempdir().unwrap();

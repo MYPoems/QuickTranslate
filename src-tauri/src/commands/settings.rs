@@ -81,12 +81,31 @@ pub fn get_settings(app: AppHandle) -> Result<SettingsView, AppError> {
     )
 }
 
+fn replace_cloud_speech_api_key(
+    secrets: &dyn crate::security::SecretStore,
+    value: Option<&str>,
+) -> Result<(), AppError> {
+    match value {
+        Some(value) => secrets.save_cloud_speech_api_key(value),
+        None => secrets.delete_cloud_speech_api_key(),
+    }
+}
+
 #[tauri::command]
 pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsView, AppError> {
     let state = app.state::<AppState>();
     let candidate = SettingsStore::validate(&update)?;
     #[cfg(debug_assertions)]
     if crate::qa::directory().is_some() {
+        if update.clear_cloud_speech_api_key {
+            state.secrets.delete_cloud_speech_api_key()?;
+        } else if let Some(key) = update
+            .cloud_speech_api_key
+            .as_deref()
+            .filter(|key| !key.trim().is_empty())
+        {
+            state.secrets.save_cloud_speech_api_key(key.trim())?;
+        }
         state.settings.replace(candidate)?;
         return state.settings.view(
             state.secrets.as_ref(),
@@ -97,6 +116,18 @@ pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsV
     let previous = state.settings.get()?;
     let previous_api_key = state.secrets.get_api_key()?;
     let previous_cloud_ocr_api_key = state.secrets.get_cloud_ocr_api_key()?;
+    let previous_cloud_speech_api_key = state.secrets.get_cloud_speech_api_key()?;
+    let desired_cloud_speech_api_key = if update.clear_cloud_speech_api_key {
+        None
+    } else {
+        update
+            .cloud_speech_api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+            .map(str::to_string)
+            .or_else(|| previous_cloud_speech_api_key.clone())
+    };
     let previous_auto_start = app
         .autolaunch()
         .is_enabled()
@@ -130,7 +161,14 @@ pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsV
         set_auto_start(&app, update.auto_start_enabled)?;
         replace_api_key(state.secrets.as_ref(), desired_api_key.as_deref())?;
         replace_cloud_ocr_api_key(state.secrets.as_ref(), desired_cloud_ocr_api_key.as_deref())?;
+        replace_cloud_speech_api_key(
+            state.secrets.as_ref(),
+            desired_cloud_speech_api_key.as_deref(),
+        )?;
         state.settings.replace(candidate)?;
+        state.cloud_speech.stop();
+        state.cloud_speech.clear_cache();
+        state.speech_plugin.stop_synthesis();
         Ok(())
     })();
 
@@ -142,6 +180,10 @@ pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsV
             previous_cloud_ocr_api_key.as_deref(),
         );
         let _ = set_auto_start(&app, previous_auto_start);
+        let _ = replace_cloud_speech_api_key(
+            state.secrets.as_ref(),
+            previous_cloud_speech_api_key.as_deref(),
+        );
         let _ = replace_shortcuts(&app, &previous.global_shortcut, &previous.ocr_shortcut);
         state.record_error(&error);
         return Err(error);
@@ -291,6 +333,8 @@ pub fn import_settings_backup(contents: String) -> Result<SettingsBackup, AppErr
         clear_api_key: false,
         cloud_ocr_api_key: None,
         clear_cloud_ocr_api_key: false,
+        cloud_speech_api_key: None,
+        clear_cloud_speech_api_key: false,
         auto_start_enabled: backup.auto_start_enabled,
     })?;
     Ok(SettingsBackup {

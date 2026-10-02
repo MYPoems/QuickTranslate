@@ -13,7 +13,21 @@ mod providers;
 mod qa;
 mod security;
 mod speech;
+mod speech_cache;
+mod speech_cloud;
 mod speech_plugin;
+#[cfg(windows)]
+mod speech_worker;
+
+#[cfg(windows)]
+pub fn run_speech_worker() {
+    let args: Vec<_> = std::env::args_os().collect();
+    if args.len() != 4 {
+        return;
+    }
+    let threads = args[3].to_string_lossy().parse().unwrap_or(4);
+    let _ = speech_worker::run(std::path::Path::new(&args[2]), threads);
+}
 mod storage;
 mod translation;
 #[cfg(not(test))]
@@ -118,6 +132,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::speech::list_speech_voices,
+            commands::speech::get_speech_preferences,
+            commands::speech::stream_cloud_speech,
+            commands::speech::test_cloud_speech,
             commands::speech::synthesize_speech,
             commands::speech::stop_speech,
             commands::speech::get_speech_plugin_status,

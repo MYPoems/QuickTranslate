@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{errors::AppError, security::SecretStore, speech::SpeechPreferences};
 
-pub const CURRENT_SETTINGS_SCHEMA: u32 = 3;
+pub const CURRENT_SETTINGS_SCHEMA: u32 = 4;
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -94,6 +94,7 @@ pub struct SettingsView {
     pub cloud_ocr_model: String,
     pub api_key_configured: bool,
     pub cloud_ocr_api_key_configured: bool,
+    pub cloud_speech_api_key_configured: bool,
     pub paddle_ocr_installed: bool,
     pub auto_start_enabled: bool,
 }
@@ -118,6 +119,9 @@ pub struct UpdateSettings {
     pub cloud_ocr_api_key: Option<String>,
     #[serde(default)]
     pub clear_cloud_ocr_api_key: bool,
+    pub cloud_speech_api_key: Option<String>,
+    #[serde(default)]
+    pub clear_cloud_speech_api_key: bool,
     #[serde(default)]
     pub auto_start_enabled: bool,
 }
@@ -177,6 +181,7 @@ impl SettingsStore {
             cloud_ocr_model: settings.cloud_ocr_model,
             api_key_configured: secrets.get_api_key()?.is_some(),
             cloud_ocr_api_key_configured: secrets.get_cloud_ocr_api_key()?.is_some(),
+            cloud_speech_api_key_configured: secrets.get_cloud_speech_api_key()?.is_some(),
             paddle_ocr_installed,
             auto_start_enabled,
         })
@@ -398,6 +403,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn v12_speech_migration_defaults_cloud_but_preserves_local_voice_and_history_path() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let old = r#"{"schemaVersion":3,"model":"my-model","globalShortcut":"Alt+Q","ocrShortcut":"Alt+W","speech":{"rate":125,"chineseVoice":"plugin:kokoro:58","englishVoice":"my-en-voice","bilingual":true}}"#;
+        fs::write(&path, old).unwrap();
+        let upgraded = SettingsStore::load(path.clone()).unwrap().get().unwrap();
+        assert_eq!(
+            upgraded.speech.provider,
+            crate::speech::SpeechProvider::Cloud
+        );
+        assert_eq!(upgraded.speech.chinese_voice, "plugin:kokoro:58");
+        assert_eq!(upgraded.speech.english_voice, "my-en-voice");
+        assert_eq!(upgraded.speech.rate, 125);
+        assert!(upgraded.speech.bilingual);
+        assert_eq!(upgraded.model, "my-model");
+        assert_eq!(
+            fs::read_to_string(migration_backup_path(&path, 3)).unwrap(),
+            old
+        );
+        assert_eq!(SettingsStore::load(path).unwrap().get().unwrap(), upgraded);
+    }
+
+    #[test]
     fn v1_upgrade_preserves_every_existing_setting_and_is_idempotent() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
@@ -460,6 +488,7 @@ mod tests {
                 chinese_voice: "Chinese-test".into(),
                 english_voice: "English-test".into(),
                 bilingual: true,
+                ..SpeechPreferences::default()
             },
             ..AppSettings::default()
         };
@@ -523,6 +552,8 @@ mod tests {
             clear_api_key: false,
             cloud_ocr_api_key: None,
             clear_cloud_ocr_api_key: false,
+            cloud_speech_api_key: None,
+            clear_cloud_speech_api_key: false,
             auto_start_enabled: false,
         }
     }

@@ -1,7 +1,13 @@
 export type Language = "chinese" | "english";
 export type OcrEngineKind = "windows" | "paddle" | "cloud";
 export type OcrLanguage = "auto" | "chinese" | "english";
-export interface SpeechPreferences { rate: number; chineseVoice: string; englishVoice: string; bilingual: boolean }
+export interface SpeechPreferences {
+  provider: "cloud" | "offline";
+  cloudEndpoint: string; cloudModel: string;
+  cloudChineseVoice: string; cloudEnglishVoice: string;
+  threads: number;
+  rate: number; chineseVoice: string; englishVoice: string; bilingual: boolean;
+}
 export interface SpeechVoice { id: string; name: string; language: string }
 export interface SpeechAudio { audioDataUrl: string; voiceName: string }
 
@@ -46,6 +52,7 @@ export interface SettingsView {
   cloudOcrModel: string;
   apiKeyConfigured: boolean;
   cloudOcrApiKeyConfigured: boolean;
+  cloudSpeechApiKeyConfigured: boolean;
   paddleOcrInstalled: boolean;
   autoStartEnabled: boolean;
 }
@@ -65,6 +72,8 @@ export interface UpdateSettings {
   clearApiKey: boolean;
   cloudOcrApiKey?: string;
   clearCloudOcrApiKey: boolean;
+  cloudSpeechApiKey?: string;
+  clearCloudSpeechApiKey: boolean;
   autoStartEnabled: boolean;
 }
 

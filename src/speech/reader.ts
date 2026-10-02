@@ -10,6 +10,7 @@ export interface ReaderState {
   message?: string;
 }
 export interface AudioPlayer {
+  errorMessage?: string;
   playbackRate: number;
   onended: (() => void) | null;
   onerror: (() => void) | null;
@@ -17,7 +18,8 @@ export interface AudioPlayer {
   pause(): void;
   dispose(): void;
 }
-export const defaultSpeech: SpeechPreferences = { rate: 100, chineseVoice: "", englishVoice: "", bilingual: false };
+export const defaultSpeech: SpeechPreferences = { provider: "cloud", cloudEndpoint: "wss://dashscope.aliyuncs.com/api-ws/v1/realtime", cloudModel: "qwen3-tts-flash-realtime", cloudChineseVoice: "Cherry", cloudEnglishVoice: "Cherry", threads: 4, rate: 100, chineseVoice: "", englishVoice: "", bilingual: false };
+export interface PreparedSpeech { player: AudioPlayer; voiceName: string }
 
 // Short, Unicode-safe segments keep synthesis responsive even for long OCR results.
 export function splitSpeech(text: string, side: ReadSide): ReadSegment[] {
@@ -27,11 +29,19 @@ export function splitSpeech(text: string, side: ReadSide): ReadSegment[] {
     let chunk = "";
     for (const sentence of sentences) {
       const chars = Array.from(sentence);
-      if (Array.from(chunk + sentence).length > 400 && chunk.trim()) {
+      const limit = () => pieces.length === 0 ? (/[\u3400-\u9fff]/u.test(sentence) ? 40 : 120) : 160;
+      if (Array.from(chunk + sentence).length > limit() && chunk.trim()) {
         pieces.push(chunk.trim()); chunk = "";
       }
-      while (chars.length > 400) pieces.push(chars.splice(0, 400).join("").trim());
+      while (chars.length > limit()) {
+        const max = limit();
+        // Prefer a word/clause boundary; hard split only unbroken Unicode-safe text.
+        let boundary = max;
+        for (let i = max - 1; i >= Math.floor(max / 2); i--) { if (/[\s，,；;：:]/u.test(chars[i])) { boundary = i + 1; break; } }
+        pieces.push(chars.splice(0, boundary).join("").trim());
+      }
       chunk += chars.join("");
+      if (pieces.length === 0 && chunk.trim()) { pieces.push(chunk.trim()); chunk = ""; }
     }
     if (chunk.trim()) pieces.push(chunk.trim());
   }
@@ -46,14 +56,16 @@ export class Reader {
   private finish?: () => void;
   private state: ReaderState = { status: "idle" };
   private paused = false;
+  private cancellation = new AbortController();
   constructor(
-    private synthesize: (segment: ReadSegment, voiceId: string) => Promise<SpeechAudio>,
+    private synthesize: (segment: ReadSegment, voiceId: string, preferences: SpeechPreferences, signal: AbortSignal) => Promise<SpeechAudio | PreparedSpeech>,
     private createAudio: (url: string) => AudioPlayer,
     private changed: (state: ReaderState) => void,
   ) {}
   get active(): boolean { return this.state.status !== "idle" && this.state.status !== "error"; }
   stop(): void {
     this.generation++;
+    this.cancellation.abort(); this.cancellation = new AbortController();
     this.paused = false;
     this.cleanup();
     this.emit({ status: "idle" });
@@ -61,25 +73,36 @@ export class Reader {
   async read(segments: ReadSegment[], preferences: SpeechPreferences): Promise<void> {
     this.stop();
     const generation = this.generation;
+    const signal = this.cancellation.signal;
+    const prepare = (index: number) => {
+      const segment = segments[index];
+      return this.synthesize(segment, segment.language === "zh" ? preferences.chineseVoice : preferences.englishVoice, preferences, signal)
+        .then(audio => { if (signal.aborted && "player" in audio) audio.player.dispose(); return { audio }; }, error => ({ error }));
+    };
+    let pending = segments.length ? prepare(0) : undefined;
     for (let position = 0; position < segments.length; position++) {
       if (generation !== this.generation) return;
       const segment = segments[position];
       this.emit({ status: "loading", segment, position: position + 1, total: segments.length });
       try {
-        const audio = await this.synthesize(segment, segment.language === "zh" ? preferences.chineseVoice : preferences.englishVoice);
+        const prepared = await pending!;
+        if ("error" in prepared) throw prepared.error;
+        const audio = prepared.audio;
         if (generation !== this.generation) return;
-        const player = this.createAudio(audio.audioDataUrl);
+        const player = "player" in audio ? audio.player : this.createAudio(audio.audioDataUrl);
         this.player = player;
         player.playbackRate = preferences.rate / 100;
         const done = new Promise<void>((resolve, reject) => {
           this.finish = resolve;
           player.onended = resolve;
-          player.onerror = () => reject(new Error("无法播放语音，请检查系统音频设备"));
+          player.onerror = () => reject(new Error(player.errorMessage || "无法播放语音，请检查系统音频设备"));
         });
         // Attach the error handler before starting playback.
         const settled = done.then(() => undefined, (error: unknown) => error);
         this.emit({ ...this.state, status: this.paused ? "paused" : "playing", message: audio.voiceName });
         if (!this.paused) await player.play();
+        // Only one lookahead: synthesis and playback overlap, never two audible players.
+        pending = position + 1 < segments.length ? prepare(position + 1) : undefined;
         const playbackError = await settled;
         if (generation !== this.generation) return;
         if (playbackError) throw playbackError;
@@ -87,6 +110,7 @@ export class Reader {
       } catch (error) {
         if (generation !== this.generation) return;
         this.cleanup();
+        this.cancellation.abort();
         this.emit({ status: "error", message: error instanceof Error ? error.message : String((error as { message?: string })?.message || error) });
         return;
       }

@@ -4,7 +4,10 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
-if (-not $Installer) { $Installer = Join-Path $projectRoot 'artifacts/v1.2.0/QuickTranslate_1.2.0_x64-setup.exe' }
+if (-not $Installer) {
+    $version = (Get-Content -LiteralPath (Join-Path $projectRoot 'package.json') -Raw | ConvertFrom-Json).version
+    $Installer = Join-Path $projectRoot "artifacts/v$version/QuickTranslate_${version}_x64-setup.exe"
+}
 $installerPath = (Resolve-Path -LiteralPath $Installer).Path
 if ((Get-FileHash -LiteralPath $installerPath -Algorithm SHA256).Hash -ne $ExpectedSha256.ToUpperInvariant()) { throw '安装包哈希不符，未执行安装' }
 $installedRoot = Join-Path $env:LOCALAPPDATA 'QuickTranslate'

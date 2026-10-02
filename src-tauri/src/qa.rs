@@ -10,8 +10,19 @@ pub fn directory() -> Option<PathBuf> {
 }
 
 #[derive(Default)]
-pub struct Secrets(Mutex<(Option<String>, Option<String>)>);
+pub struct Secrets(Mutex<(Option<String>, Option<String>, Option<String>)>);
 impl SecretStore for Secrets {
+    fn save_cloud_speech_api_key(&self, value: &str) -> Result<(), AppError> {
+        self.0.lock().unwrap().2 = Some(value.into());
+        Ok(())
+    }
+    fn get_cloud_speech_api_key(&self) -> Result<Option<String>, AppError> {
+        Ok(self.0.lock().unwrap().2.clone())
+    }
+    fn delete_cloud_speech_api_key(&self) -> Result<(), AppError> {
+        self.0.lock().unwrap().2 = None;
+        Ok(())
+    }
     fn save_api_key(&self, value: &str) -> Result<(), AppError> {
         self.0.lock().unwrap().0 = Some(value.into());
         Ok(())

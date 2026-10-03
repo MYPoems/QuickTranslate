@@ -18,7 +18,8 @@ const reader = new Reader(prepareSpeech, browserAudio, renderReading);
 
 export function mountPopup(): void {
   root.innerHTML = `<section class="popup-shell">
-    <header class="popup-header" data-tauri-drag-region><span data-tauri-drag-region>QuickTranslate</span><div>
+    <header class="popup-header"><span class="popup-title">QuickTranslate</span>
+      <div class="popup-drag-region" data-tauri-drag-region title="按住鼠标左键拖动悬浮窗" aria-label="拖动悬浮窗"></div><div class="popup-window-controls">
       <button id="pin" class="icon-button" type="button" aria-label="固定悬浮窗" aria-pressed="false" title="固定悬浮窗">${icon("pin")}</button>
       <button id="close" class="icon-button" type="button" aria-label="关闭">${icon("close")}</button></div></header>
     <div class="source-row"><p id="source" class="source">选择文字后按 Alt + Q</p><span id="badge" class="badge" hidden></span></div>

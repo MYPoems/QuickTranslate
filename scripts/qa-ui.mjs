@@ -66,6 +66,15 @@ try {
       await page.screenshot({path:resolve(output,`${kind}-${width}-${theme}.png`)});
     }
     if(kind==="popup") {
+      const drag=await page.locator(".popup-drag-region").boundingBox();
+      const title=await page.locator(".popup-title").boundingBox(), controls=await page.locator(".popup-window-controls").boundingBox();
+      assert.ok(drag.width>40&&drag.height>8,"usable blank caption drag area");
+      assert.equal(await page.locator(".popup-drag-region").evaluate(node=>getComputedStyle(node).cursor),"default","drag area keeps arrow cursor");
+      assert.ok(drag.y>=6&&drag.x>title.x+title.width&&drag.x+drag.width<controls.x,"drag stays inset and outside title/buttons");
+      assert.equal(await page.evaluate(()=>{
+        const points=[[innerWidth/2,1],[1,innerHeight/2],[innerWidth-2,innerHeight/2],[innerWidth/2,innerHeight-2],[1,1],[innerWidth-2,1],[1,innerHeight-2],[innerWidth-2,innerHeight-2]];
+        return points.every(([x,y])=>!document.elementFromPoint(x,y)?.closest('[data-tauri-drag-region]'));
+      }),true,"resize edges and corners never start caption dragging");
       const shell=await page.locator(".popup-shell").boundingBox(); assert.deepEqual([shell.x,shell.y,shell.width,shell.height],[0,0,width,height],"popup has no outer inset/frame");
       assert.equal(await page.locator(".popup-shell").evaluate(node=>getComputedStyle(node).boxShadow),"none");
       await page.locator("#more").click();

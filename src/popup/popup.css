@@ -1,7 +1,10 @@
 .popup-window { background: transparent; padding: 0; }
 .popup-shell { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--bg) var(--popup-opacity), transparent); }
 .popup-header { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 7px 12px; gap: 12px; border-bottom: 1px solid var(--line); min-height: 42px; font-size: 13px; font-weight: 500; }
-.popup-header > div { display: flex; gap: 4px; }
+.popup-title { flex: none; }
+/* The native resize perimeter stays outside this inset caption region. */
+.popup-drag-region { flex: 1; min-width: 0; align-self: stretch; margin-block: 4px; cursor: default; user-select: none; }
+.popup-window-controls { display: flex; flex: none; gap: 4px; }
 .icon-button { border: 0; background: transparent; color: var(--muted); border-radius: 7px; padding: 6px; display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; }
 .icon-button:hover { background: var(--raised); }
 #pin[aria-pressed="true"] { background: var(--selected); color: var(--accent); }

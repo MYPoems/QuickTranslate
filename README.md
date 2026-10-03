@@ -1,6 +1,6 @@
 # QuickTranslate
 
-源码版本：**v1.6.0**（界面迭代，已完成本机安装与数据保留验证，暂未发布 GitHub Release）。采用 Memo 浅色/深蓝色主题、精简悬浮窗、分类设置、双栏生词本与历史；保留 AI 词卡缓存、间隔复习、掌握测试、云端 OCR 与独立朗读。下面的一键下载命令仍指向已发布的 **v1.0.0**，不使用尚未发布的下载链接。
+当前源码版本：**v1.6.1**。采用 Memo 浅色/深蓝色主题、精简悬浮窗、分类设置、双栏生词本与历史；支持顶部空白区按住拖动、背景透明度、AI 词卡缓存、间隔复习、掌握测试、云端 OCR 与独立朗读。安装包与更新签名见 [v1.6.1 Release](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.6.1)。
 
 QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 OCR 翻译工具。它常驻系统托盘：选中文字后按 `Alt + Q` 可划词翻译，按 `Alt + W` 可框选屏幕区域并识别后翻译。v1.2.0 新安装默认推荐自备 API Key 的云端 OCR；Windows OCR 与 PP-OCRv6 Small 本地插件作为显式可选的离线替代。升级保留用户原有引擎选择，已发布 v1.0.0 的默认引擎仍为 Windows OCR。
 
@@ -8,13 +8,13 @@ QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 O
 
 ## 安装正式版（普通用户）
 
-支持 Windows x64。普通用户不需要安装 Git、Node.js、Rust 或 Visual Studio Build Tools。使用 PowerShell 执行以下命令即可下载、校验并运行 `v1.0.0` 安装程序：
+支持 Windows x64。普通用户不需要安装 Git、Node.js、Rust 或 Visual Studio Build Tools。使用 PowerShell 执行以下命令即可下载、校验并运行 `v1.6.1` 安装程序；已有版本可覆盖升级，升级前请备份设置、历史和生词本：
 
 ```powershell
-$installer = Join-Path $env:TEMP "QuickTranslate_1.0.0_x64-setup.exe"
-Invoke-WebRequest "https://github.com/MYPoems/QuickTranslate/releases/download/v1.0.0/QuickTranslate_1.0.0_x64-setup.exe" -OutFile $installer
-if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "F8ED1532E7F49BDCC5D84FE7061E04DA6B09E7F8F694A6770D98CDC90280838D") { Remove-Item $installer -Force; throw "安装包校验失败，请勿运行" }
-Start-Process $installer -Wait
+$installer = Join-Path $env:TEMP "QuickTranslate_1.6.1_x64-setup.exe"
+Invoke-WebRequest "https://github.com/MYPoems/QuickTranslate/releases/download/v1.6.1/QuickTranslate_1.6.1_x64-setup.exe" -OutFile $installer
+if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "A339D2C8AF45CD2C7D8A07783128673665970AD324C3169CCF5081FD9E661ADF") { Remove-Item -LiteralPath $installer -Force; throw "安装包校验失败，请勿运行" }
+Start-Process -FilePath $installer -Wait
 Remove-Item $installer -Force
 ```
 
@@ -24,6 +24,7 @@ Remove-Item $installer -Force
 
 - 悬浮窗保留“复制译文”和“更多”；重译、复制原文、批量收藏、生词本及请求信息集中到上拉菜单
 - 去除悬浮窗外围底层外框和额外白边，仅保留单层圆角内容卡片
+- 顶部中间空白区域按住鼠标左键移动即可拖动，保持普通箭头光标；标题/按钮不触发拖动，边缘和角落仍可缩放，大小可记忆
 - 原文 / 译文标题后的小喇叭分别朗读，再次点击停止；不提供双语连续朗读按钮
 - 通用 → 外观：跟随系统、浅色、深色（Memo 配色）；悬浮窗背景透明度 0–30%，文字、按钮及展开菜单不透明
 - 生词本和历史为统一圆角的列表 / 详情双栏；单词、来源句、例句及其中译文、历史原文和译文都可独立朗读

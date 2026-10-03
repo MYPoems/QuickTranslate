@@ -27,14 +27,39 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and verify release bundle
+      - name: Build signed bundle or Windows smoke package
+        id: bundle
         shell: pwsh
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-        run: ./scripts/build-release.ps1
+        run: |
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+            ./scripts/build-release.ps1
+            "signed=true" >> $env:GITHUB_OUTPUT
+          } else {
+            # Do not distribute an unsigned updater or request a private key for CI.
+            # A controlled local signed build can be published after CI succeeds.
+            npm run check
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            npm test
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            cargo fmt --manifest-path src-tauri/Cargo.toml --all -- --check
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            cargo clippy --locked --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            cargo test --locked --manifest-path src-tauri/Cargo.toml
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $smokeConfig = Join-Path $env:RUNNER_TEMP 'quicktranslate-ci-smoke.json'
+            @{ bundle = @{ createUpdaterArtifacts = $false } } | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $smokeConfig -Encoding utf8NoBOM
+            npm run tauri build -- --bundles nsis --config $smokeConfig
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            "signed=false" >> $env:GITHUB_OUTPUT
+            Write-Output "::notice::No CI signing key: Windows smoke packaging only. No unsigned artifacts are uploaded. Publish only separately verified signed artifacts."
+          }
 
       - uses: actions/upload-artifact@v4
+        if: steps.bundle.outputs.signed == 'true'
         with:
           name: QuickTranslate-${{ github.ref_name }}-windows-x64
           path: artifacts/**

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 import { JSDOM } from "jsdom";
+import { readFile } from "node:fs/promises";
 import { defaultSpeech } from "../src/speech/reader";
 import type { SettingsView, UpdateProgress, TranslationEvent } from "../src/types";
 
@@ -58,6 +59,28 @@ async function mount(entry: "settings" | "popup" | "history") {
   const element = <T extends HTMLElement>(selector: string) => dom.window.document.querySelector<T>(selector)!;
   return { dom, qa, calls, element, close: () => dom.window.close() };
 }
+
+test("popup native drag is limited to blank caption and popup-only capability", async () => {
+  const { element, dom, close } = await mount("popup");
+  try {
+    const regions = dom.window.document.querySelectorAll("[data-tauri-drag-region]");
+    assert.equal(regions.length, 1);
+    assert.equal(regions[0], element(".popup-drag-region"));
+    assert.equal(regions[0].textContent, "");
+    assert.equal(regions[0].querySelector("button, input, textarea"), null);
+    for (const selector of [".popup-title", "#pin", "#close", ".content", ".actions"]) {
+      assert.equal(element(selector).closest("[data-tauri-drag-region]"), null, selector);
+    }
+    const capability = JSON.parse(await readFile("src-tauri/capabilities/popup-drag.json", "utf8"));
+    assert.deepEqual(capability.windows, ["popup"]);
+    assert.deepEqual(capability.permissions, ["core:window:allow-start-dragging"]);
+    assert.equal(capability.remote, undefined);
+    const config = JSON.parse(await readFile("src-tauri/tauri.conf.json", "utf8"));
+    const popup = config.app.windows.find((window: { label: string }) => window.label === "popup");
+    assert.equal(popup.resizable, true);
+    assert.equal(popup.shadow, false);
+  } finally { close(); }
+});
 
 test("settings preserve installed/missing voices, rate and preference on save", async () => {
   const { element, calls, close } = await mount("settings");

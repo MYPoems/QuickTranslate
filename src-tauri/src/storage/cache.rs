@@ -115,6 +115,25 @@ impl TranslationCache {
         Ok(Some(result))
     }
 
+    pub fn history_result(&self, id: i64) -> Result<TranslationResult, AppError> {
+        let connection = self
+            .connection
+            .lock()
+            .map_err(|_| AppError::Database("cache lock poisoned".into()))?;
+        let json: Option<String> = connection
+            .query_row(
+                "SELECT result_json FROM translation_cache WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let json = json.ok_or_else(|| AppError::Database("history entry was not found".into()))?;
+        let mut result: TranslationResult =
+            serde_json::from_str(&json).map_err(|error| AppError::Database(error.to_string()))?;
+        result.cached = true;
+        Ok(result)
+    }
+
     pub fn put(&self, key: &str, result: &TranslationResult) -> Result<(), AppError> {
         let connection = self
             .connection
@@ -348,11 +367,15 @@ mod tests {
         let cache = TranslationCache::in_memory().unwrap();
         cache.put("first", &result()).unwrap();
         let entries = cache.history("hello", false, 50).unwrap();
+        let cached = cache.history_result(entries[0].id).unwrap();
+        assert!(cached.cached);
+        assert_eq!(cached.source_text, entries[0].source_text);
         assert_eq!(entries.len(), 1);
         let id = entries[0].id;
         cache.set_favorite(id, true).unwrap();
         assert!(cache.history("", true, 50).unwrap()[0].favorite);
         cache.delete_history_entry(id).unwrap();
+        assert!(cache.history_result(id).is_err());
         assert!(cache.history("", false, 50).unwrap().is_empty());
     }
 

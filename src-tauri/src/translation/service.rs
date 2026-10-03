@@ -151,6 +151,13 @@ impl TranslationService {
             .map_err(|error| AppError::Internal(error.to_string()))?
     }
 
+    pub async fn history_result(&self, id: i64) -> Result<TranslationResult, AppError> {
+        let cache = Arc::clone(&self.cache);
+        tokio::task::spawn_blocking(move || cache.history_result(id))
+            .await
+            .map_err(|error| AppError::Internal(error.to_string()))?
+    }
+
     pub async fn set_favorite(&self, id: i64, favorite: bool) -> Result<(), AppError> {
         let cache = Arc::clone(&self.cache);
         tokio::task::spawn_blocking(move || cache.set_favorite(id, favorite))

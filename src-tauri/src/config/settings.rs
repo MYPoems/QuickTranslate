@@ -11,7 +11,43 @@ use serde::{Deserialize, Serialize};
 
 use crate::{errors::AppError, security::SecretStore, speech::SpeechPreferences};
 
-pub const CURRENT_SETTINGS_SCHEMA: u32 = 4;
+pub const CURRENT_SETTINGS_SCHEMA: u32 = 5;
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AppearanceTheme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AppearancePreferences {
+    pub theme: AppearanceTheme,
+    pub popup_opacity: u8,
+}
+
+impl Default for AppearancePreferences {
+    fn default() -> Self {
+        Self {
+            theme: AppearanceTheme::System,
+            popup_opacity: 96,
+        }
+    }
+}
+
+impl AppearancePreferences {
+    pub fn validate(&self) -> Result<(), AppError> {
+        if !(70..=100).contains(&self.popup_opacity) {
+            return Err(AppError::Settings(
+                "悬浮窗背景不透明度必须在 70% 到 100% 之间".into(),
+            ));
+        }
+        Ok(())
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -34,6 +70,7 @@ pub enum OcrLanguage {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
+    pub appearance: AppearancePreferences,
     pub schema_version: u32,
     pub provider: String,
     pub base_url: String,
@@ -51,6 +88,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            appearance: AppearancePreferences::default(),
             schema_version: CURRENT_SETTINGS_SCHEMA,
             provider: "OpenAI Compatible".into(),
             base_url: "https://api.openai.com/v1".into(),
@@ -82,6 +120,7 @@ fn legacy_ocr_engine() -> OcrEngineKind {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsView {
+    pub appearance: AppearancePreferences,
     pub speech: SpeechPreferences,
     pub provider: String,
     pub base_url: String,
@@ -102,6 +141,8 @@ pub struct SettingsView {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateSettings {
+    #[serde(default)]
+    pub appearance: AppearancePreferences,
     #[serde(default)]
     pub speech: SpeechPreferences,
     pub provider: String,
@@ -169,6 +210,7 @@ impl SettingsStore {
     ) -> Result<SettingsView, AppError> {
         let settings = self.get()?;
         Ok(SettingsView {
+            appearance: settings.appearance,
             speech: settings.speech,
             provider: settings.provider,
             base_url: settings.base_url,
@@ -188,6 +230,7 @@ impl SettingsStore {
     }
 
     pub fn validate(update: &UpdateSettings) -> Result<AppSettings, AppError> {
+        update.appearance.validate()?;
         update.speech.validate()?;
         let provider = update.provider.trim().to_string();
         let model = update.model.trim().to_string();
@@ -219,6 +262,7 @@ impl SettingsStore {
         };
 
         Ok(AppSettings {
+            appearance: update.appearance.clone(),
             speech: update.speech.clone(),
             schema_version: CURRENT_SETTINGS_SCHEMA,
             provider,
@@ -403,6 +447,69 @@ mod tests {
     use super::*;
 
     #[test]
+    fn v15_appearance_migration_preserves_configuration_and_exact_backup() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let mut before = AppSettings {
+            schema_version: 4,
+            model: "custom-model".into(),
+            ocr_engine: OcrEngineKind::Paddle,
+            speech: SpeechPreferences {
+                english_voice: "my-voice".into(),
+                rate: 125,
+                ..SpeechPreferences::default()
+            },
+            ..AppSettings::default()
+        };
+        let mut raw = serde_json::to_value(&before).unwrap();
+        raw.as_object_mut().unwrap().remove("appearance");
+        let bytes = serde_json::to_vec_pretty(&raw).unwrap();
+        fs::write(&path, &bytes).unwrap();
+        let upgraded = SettingsStore::load(path.clone()).unwrap().get().unwrap();
+        before.schema_version = CURRENT_SETTINGS_SCHEMA;
+        assert_eq!(upgraded, before);
+        assert_eq!(fs::read(migration_backup_path(&path, 4)).unwrap(), bytes);
+        assert_eq!(SettingsStore::load(path).unwrap().get().unwrap(), upgraded);
+    }
+
+    #[test]
+    fn appearance_round_trip_and_bounds() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let store = SettingsStore::load(path.clone()).unwrap();
+        for theme in [
+            AppearanceTheme::Light,
+            AppearanceTheme::Dark,
+            AppearanceTheme::System,
+        ] {
+            let candidate = SettingsStore::validate(&UpdateSettings {
+                appearance: AppearancePreferences {
+                    theme,
+                    popup_opacity: 70,
+                },
+                ..update("https://example.com/v1")
+            })
+            .unwrap();
+            store.replace(candidate.clone()).unwrap();
+            assert_eq!(
+                SettingsStore::load(path.clone()).unwrap().get().unwrap(),
+                candidate
+            );
+        }
+        for popup_opacity in [0, 69, 101, 255] {
+            assert!(SettingsStore::validate(&UpdateSettings {
+                appearance: AppearancePreferences {
+                    popup_opacity,
+                    ..AppearancePreferences::default()
+                },
+                ..update("https://example.com/v1")
+            })
+            .is_err());
+        }
+        assert!(serde_json::from_str::<AppearancePreferences>(r#"{"theme":"invalid"}"#).is_err());
+    }
+
+    #[test]
     fn v12_speech_migration_defaults_cloud_but_preserves_local_voice_and_history_path() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("settings.json");
@@ -538,6 +645,7 @@ mod tests {
 
     fn update(base_url: &str) -> UpdateSettings {
         UpdateSettings {
+            appearance: AppearancePreferences::default(),
             speech: SpeechPreferences::default(),
             provider: "OpenAI Compatible".into(),
             base_url: base_url.into(),

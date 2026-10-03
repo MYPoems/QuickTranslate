@@ -8,6 +8,7 @@ const entry=(overrides:Partial<VocabularyEntry>={}):VocabularyEntry=>({id:1,word
 async function mount(kind:"collect"|"vocabulary", initial=entry()) {
   const dom=new JSDOM('<div id="app"></div>',{url:"http://localhost"});
   const globals=globalThis as unknown as Record<string,unknown>;
+  globals.AudioContext=class {async resume(){}};
   for(const name of ["window","document","HTMLElement","HTMLInputElement","HTMLSelectElement","HTMLFormElement","HTMLTextAreaElement","HTMLDialogElement","FormData"]){globals[name]=(dom.window as unknown as Record<string,unknown>)[name];}
   dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
   dom.window.HTMLElement.prototype.scrollIntoView=()=>{};
@@ -15,6 +16,8 @@ async function mount(kind:"collect"|"vocabulary", initial=entry()) {
   let value=initial;const handlers=new Map<string,(e:{payload:unknown})=>void>();
   const qa={async listen(name:string,fn:(e:{payload:unknown})=>void){handlers.set(name,fn);return()=>handlers.delete(name);},async invoke(command:string,args:Record<string,unknown>={}) {
     calls.push({command,args});
+    if(command==="get_speech_preferences")return {provider:"offline",rate:100,chineseVoice:"",englishVoice:"",bilingual:false,threads:4};
+    if(command==="synthesize_speech")throw new Error("fixture voice unavailable");
     if(command==="list_vocabulary")return {entries:[value],total:1,due:1,tests:1,mastered:value.status==="mastered"?1:0,now:Math.floor(Date.now()/1000),rules:{intervalHours:4,dailyLimit:20}};
     if(command==="get_vocabulary_entry")return value;
     if(command==="collect_vocabulary")return entry({word:String(args.word),card:null,generationState:"pending"});
@@ -58,4 +61,15 @@ test("card editor provides ordinary fields and submits cached quizzes without hi
 });
 test("pending draft deletion is available but never sent before confirmation",async()=>{
   const m=await mount("vocabulary",entry({card:null,generationState:"pending"}));try{m.el("#delete-pending").click();await settle();assert.equal(m.calls.some(c=>c.command==="delete_vocabulary"),false);m.el("#confirm-no").click();await settle();assert.equal(m.calls.some(c=>c.command==="delete_vocabulary"),false);}finally{m.close();}
+});
+
+test("word and both example languages have independent icon reads; tools remain collapsed",async()=>{
+  const m=await mount("vocabulary");try{
+    assert.equal(m.el<HTMLDetailsElement>(".book-more").open,false);
+    assert.equal(m.el("#book-pause"),null);
+    for(const label of ["朗读单词","朗读英文例句","朗读中文例句"]){m.el<HTMLButtonElement>(`[aria-label="${label}"]`).click();await settle();}
+    assert.deepEqual(m.calls.filter(c=>c.command==="synthesize_speech").map(c=>c.args.text),["architecture","She studies architecture.","她学习建筑学。"]);
+    assert.equal(m.calls.some(c=>c.command==="review_vocabulary"||c.command==="generate_vocabulary"),false);
+    assert.equal(m.el<HTMLButtonElement>("#speak-word").getAttribute("aria-pressed"),"false");
+  }finally{m.close();}
 });

@@ -64,6 +64,16 @@ pub async fn set_history_favorite(id: i64, favorite: bool, app: AppHandle) -> Re
 }
 
 #[tauri::command]
+pub async fn open_history_translation(id: i64, app: AppHandle) -> Result<(), AppError> {
+    let result = app
+        .state::<AppState>()
+        .translation
+        .history_result(id)
+        .await?;
+    crate::app::show_history_result(&app, result)
+}
+
+#[tauri::command]
 pub async fn delete_history_entry(id: i64, app: AppHandle) -> Result<(), AppError> {
     app.state::<AppState>()
         .translation

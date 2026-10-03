@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { defaultSpeech } from "../speech/reader";
+import { organizeSettings, loadAppearance, appearanceFromForm, selectSettingsPanel } from "./layout";
 import type {
   AppError,
   DiagnosticsView,
@@ -129,7 +130,6 @@ export function mountSettings(): void {
           <label>英文音色<select name="englishVoice"><option value="">自动选择英文音色</option></select></label>
           <p id="voice-status" role="status">正在读取系统音色…</p>
           </div>
-          <label class="checkbox-row"><input name="bilingual" type="checkbox" />朗读原文后继续朗读译文</label>
           <label>语速<select name="speechRate"><option value="50">0.5×</option><option value="75">0.75×</option><option value="85">0.85×</option><option value="100">1×</option><option value="125">1.25×</option><option value="150">1.5×</option><option value="175">1.75×</option><option value="200">2×</option></select></label>
         </section>
         <div class="preference-card">
@@ -186,6 +186,7 @@ export function mountSettings(): void {
     </section>`;
 
   const form = root.querySelector<HTMLFormElement>("#settings-form")!;
+  organizeSettings(root, form);
   (form.elements.namedItem("speechProvider") as HTMLSelectElement).addEventListener("change", () => refreshSpeechPanels(form));
   root.querySelector("#copy-speech-key-url")!.addEventListener("click", () => void copyCloudKeyUrl());
   root.querySelector("#test-cloud-speech")!.addEventListener("click", () => void testCloudSpeech(form));
@@ -194,6 +195,8 @@ export function mountSettings(): void {
   void listen<SpeechPluginStatus>("speech-plugin-progress", ({ payload }) => renderSpeechPlugin(payload)).then(() => invoke<SpeechPluginStatus>("get_speech_plugin_status")).then(renderSpeechPlugin).catch(error => { root.querySelector("#speech-plugin-status")!.textContent = errorMessage(error); });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
+    const invalid = Array.from(form.querySelectorAll<HTMLInputElement>("input, select, textarea")).find(input => !input.closest('#settings-learning') && !input.validity.valid);
+    if (invalid) { selectSettingsPanel(form, invalid.closest<HTMLElement>("[data-settings-panel]")?.dataset.settingsPanel || "translation"); form.reportValidity(); return; }
     void save(form);
   });
   root.querySelector<HTMLButtonElement>("#test")!.addEventListener("click", () => void test(form));
@@ -248,6 +251,7 @@ async function load(form: HTMLFormElement): Promise<void> {
   setStatus("正在读取设置…", "neutral");
   try {
     const settings = await invoke<SettingsView>("get_settings");
+    loadAppearance(form, settings.appearance);
     setInput(form, "provider", settings.provider);
     setInput(form, "baseUrl", settings.baseUrl);
     setInput(form, "model", settings.model);
@@ -284,6 +288,7 @@ async function save(form: HTMLFormElement): Promise<void> {
   setStatus("正在保存…", "neutral");
   try {
     const settings = await invoke<SettingsView>("save_settings", { update: formValue(form) });
+    loadAppearance(form, settings.appearance);
     (form.elements.namedItem("apiKey") as HTMLInputElement).value = "";
     (form.elements.namedItem("clearApiKey") as HTMLInputElement).checked = false;
     (form.elements.namedItem("cloudOcrApiKey") as HTMLInputElement).value = "";
@@ -412,6 +417,7 @@ async function importSettings(form: HTMLFormElement): Promise<void> {
     setInput(form, "cloudOcrBaseUrl", backup.cloudOcrBaseUrl);
     setInput(form, "cloudOcrModel", backup.cloudOcrModel);
     setCheckbox(form, "autoStartEnabled", backup.autoStartEnabled);
+    loadAppearance(form, backup.appearance);
     await loadVoices(form, backup.speech || defaultSpeech);
     refreshSpeechPanels(form);
     refreshKeyStatus(form);
@@ -449,6 +455,7 @@ function formValue(form: HTMLFormElement): UpdateSettings {
   const apiKey = String(data.get("apiKey") || "").trim();
   const cloudOcrApiKey = String(data.get("cloudOcrApiKey") || "").trim();
   return {
+    appearance: appearanceFromForm(form),
     speech: { provider: String(data.get("speechProvider") || "cloud") as "cloud" | "offline", cloudEndpoint: String(data.get("cloudSpeechEndpoint") || defaultSpeech.cloudEndpoint), cloudModel: String(data.get("cloudSpeechModel") || defaultSpeech.cloudModel).trim(), cloudChineseVoice: String(data.get("cloudChineseVoice") || "Cherry").trim(), cloudEnglishVoice: String(data.get("cloudEnglishVoice") || "Cherry").trim(), threads: Number(data.get("speechThreads") || 4), rate: Number(data.get("speechRate") || 100), chineseVoice: String(data.get("chineseVoice") || ""), englishVoice: String(data.get("englishVoice") || ""), bilingual: data.get("bilingual") === "on" },
     provider: String(data.get("provider") || "OpenAI Compatible"),
     baseUrl: String(data.get("baseUrl") || "").trim(),
@@ -474,7 +481,8 @@ function setInput(form: HTMLFormElement, name: string, value: string): void {
 }
 
 function setCheckbox(form: HTMLFormElement, name: string, checked: boolean): void {
-  (form.elements.namedItem(name) as HTMLInputElement).checked = checked;
+  const input = form.elements.namedItem(name) as HTMLInputElement | null;
+  if (input) input.checked = checked;
 }
 
 function updateKeyStatus(configured: boolean, localProvider: boolean): void {

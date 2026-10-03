@@ -1,6 +1,10 @@
 export type Language = "chinese" | "english";
 export type OcrEngineKind = "windows" | "paddle" | "cloud";
 export type OcrLanguage = "auto" | "chinese" | "english";
+export interface AppearancePreferences {
+  theme: "system" | "light" | "dark";
+  popupOpacity: number;
+}
 export interface SpeechPreferences {
   provider: "cloud" | "offline";
   cloudEndpoint: string; cloudModel: string;
@@ -54,6 +58,7 @@ export interface TranslationEvent {
 }
 
 export interface SettingsView {
+  appearance: AppearancePreferences;
   speech: SpeechPreferences;
   provider: string;
   baseUrl: string;
@@ -72,6 +77,7 @@ export interface SettingsView {
 }
 
 export interface UpdateSettings {
+  appearance: AppearancePreferences;
   speech: SpeechPreferences;
   provider: string;
   baseUrl: string;
@@ -121,6 +127,7 @@ export interface HistoryEntry {
 }
 
 export interface SettingsBackup {
+  appearance: AppearancePreferences;
   speech: SpeechPreferences;
   schemaVersion: number;
   provider: string;

@@ -17,7 +17,7 @@ pub fn show_vocabulary(app: &AppHandle) {
     }
     let _ = WebviewWindowBuilder::new(app, "vocabulary", WebviewUrl::App("index.html".into()))
         .title("QuickTranslate 生词本")
-        .inner_size(980.0, 730.0)
+        .inner_size(860.0, 640.0)
         .min_inner_size(620.0, 500.0)
         .resizable(true)
         .center()
@@ -65,7 +65,7 @@ pub fn show_settings(app: &AppHandle) {
 
     let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html".into()))
         .title("QuickTranslate 设置")
-        .inner_size(520.0, 650.0)
+        .inner_size(820.0, 680.0)
         .min_inner_size(460.0, 560.0)
         .resizable(true)
         .center()
@@ -81,7 +81,7 @@ pub fn show_history(app: &AppHandle) {
 
     let _ = WebviewWindowBuilder::new(app, "history", WebviewUrl::App("index.html".into()))
         .title("QuickTranslate 翻译历史")
-        .inner_size(760.0, 680.0)
+        .inner_size(860.0, 640.0)
         .min_inner_size(560.0, 460.0)
         .resizable(true)
         .center()

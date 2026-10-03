@@ -211,6 +211,25 @@ pub fn begin_ocr_recognition(app: &AppHandle) -> u64 {
     request_id
 }
 
+pub fn show_history_result(app: &AppHandle, result: TranslationResult) -> Result<(), AppError> {
+    // Opening history is local-only and supersedes any in-flight translation.
+    let (request_id, _) = app.state::<AppState>().begin_request();
+    window::show_popup(app);
+    app.emit_to(
+        "popup",
+        "translation-state",
+        PopupPayload {
+            request_id,
+            status: "success",
+            source_text: None,
+            source_kind: Some("selection"),
+            result: Some(result),
+            error: None,
+        },
+    )
+    .map_err(|error| AppError::Internal(error.to_string()))
+}
+
 pub fn finish_ocr_translation(app: AppHandle, request_id: u64, recognized_text: String) -> u64 {
     if !app.state::<AppState>().is_latest(request_id) {
         return request_id;

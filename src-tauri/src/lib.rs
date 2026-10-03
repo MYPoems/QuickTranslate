@@ -120,6 +120,9 @@ pub fn run() {
                 if window.label() == "vocabulary" {
                     let _ = window.emit("vocabulary-hidden", ());
                 }
+                if window.label() == "history" {
+                    let _ = window.emit("history-hidden", ());
+                }
                 let _ = window.hide();
             }
             tauri::WindowEvent::Focused(false)
@@ -152,6 +155,7 @@ pub fn run() {
             _ => {}
         })
         .invoke_handler(tauri::generate_handler![
+            commands::settings::get_appearance_preferences,
             commands::vocabulary::set_vocabulary_collection_open,
             commands::vocabulary::open_vocabulary,
             commands::vocabulary::list_vocabulary,
@@ -184,6 +188,7 @@ pub fn run() {
             commands::translation::copy_translation,
             commands::translation::clear_translation_cache,
             commands::translation::list_translation_history,
+            commands::translation::open_history_translation,
             commands::translation::set_history_favorite,
             commands::translation::delete_history_entry,
             commands::translation::get_popup_pinned,

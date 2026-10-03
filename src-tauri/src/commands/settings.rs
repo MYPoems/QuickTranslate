@@ -6,8 +6,8 @@ use tauri_plugin_global_shortcut::GlobalShortcutExt;
 use crate::{
     app::{AppState, DiagnosticError},
     config::{
-        AppSettings, OcrEngineKind, OcrLanguage, SettingsStore, SettingsView, UpdateSettings,
-        CURRENT_SETTINGS_SCHEMA,
+        AppSettings, OcrEngineKind, OcrLanguage, SettingsBackup, SettingsStore, SettingsView,
+        UpdateSettings, CURRENT_SETTINGS_SCHEMA,
     },
     errors::AppError,
     security::provider_api_key,
@@ -32,41 +32,11 @@ pub struct DiagnosticsView {
     last_error: Option<DiagnosticError>,
 }
 
-#[derive(Serialize, serde::Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct SettingsBackup {
-    speech: crate::speech::SpeechPreferences,
-    schema_version: u32,
-    provider: String,
-    base_url: String,
-    model: String,
-    global_shortcut: String,
-    ocr_shortcut: String,
-    ocr_engine: OcrEngineKind,
-    ocr_language: OcrLanguage,
-    cloud_ocr_base_url: String,
-    cloud_ocr_model: String,
-    auto_start_enabled: bool,
-}
-
-impl Default for SettingsBackup {
-    fn default() -> Self {
-        let settings = AppSettings::default();
-        Self {
-            speech: settings.speech,
-            schema_version: settings.schema_version,
-            provider: settings.provider,
-            base_url: settings.base_url,
-            model: settings.model,
-            global_shortcut: settings.global_shortcut,
-            ocr_shortcut: settings.ocr_shortcut,
-            ocr_engine: OcrEngineKind::Windows,
-            ocr_language: settings.ocr_language,
-            cloud_ocr_base_url: settings.cloud_ocr_base_url,
-            cloud_ocr_model: settings.cloud_ocr_model,
-            auto_start_enabled: false,
-        }
-    }
+#[tauri::command]
+pub fn get_appearance_preferences(
+    app: AppHandle,
+) -> Result<crate::config::AppearancePreferences, AppError> {
+    Ok(app.state::<AppState>().settings.get()?.appearance)
 }
 
 #[tauri::command]
@@ -106,7 +76,9 @@ pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsV
         {
             state.secrets.save_cloud_speech_api_key(key.trim())?;
         }
+        let appearance = candidate.appearance.clone();
         state.settings.replace(candidate)?;
+        let _ = app.emit("appearance-changed", &appearance);
         return state.settings.view(
             state.secrets.as_ref(),
             false,
@@ -190,6 +162,7 @@ pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsV
         return Err(error);
     }
 
+    let _ = app.emit("appearance-changed", state.settings.get()?.appearance);
     state.settings.view(
         state.secrets.as_ref(),
         app.autolaunch()
@@ -291,6 +264,7 @@ pub fn export_settings_backup(app: AppHandle) -> Result<String, AppError> {
     let state = app.state::<AppState>();
     let settings = state.settings.get()?;
     let backup = SettingsBackup {
+        appearance: settings.appearance,
         speech: settings.speech,
         schema_version: CURRENT_SETTINGS_SCHEMA,
         provider: settings.provider,
@@ -312,44 +286,5 @@ pub fn export_settings_backup(app: AppHandle) -> Result<String, AppError> {
 
 #[tauri::command]
 pub fn import_settings_backup(contents: String) -> Result<SettingsBackup, AppError> {
-    let backup: SettingsBackup = serde_json::from_str(&contents)
-        .map_err(|error| AppError::Settings(format!("备份 JSON 无效：{error}")))?;
-    if backup.schema_version > CURRENT_SETTINGS_SCHEMA {
-        return Err(AppError::Settings(
-            "该备份来自更高版本，当前版本无法导入".into(),
-        ));
-    }
-    let normalized = SettingsStore::validate(&UpdateSettings {
-        speech: backup.speech,
-        provider: backup.provider,
-        base_url: backup.base_url,
-        model: backup.model,
-        global_shortcut: backup.global_shortcut,
-        ocr_shortcut: backup.ocr_shortcut,
-        ocr_engine: backup.ocr_engine,
-        ocr_language: backup.ocr_language,
-        cloud_ocr_base_url: backup.cloud_ocr_base_url,
-        cloud_ocr_model: backup.cloud_ocr_model,
-        api_key: None,
-        clear_api_key: false,
-        cloud_ocr_api_key: None,
-        clear_cloud_ocr_api_key: false,
-        cloud_speech_api_key: None,
-        clear_cloud_speech_api_key: false,
-        auto_start_enabled: backup.auto_start_enabled,
-    })?;
-    Ok(SettingsBackup {
-        speech: normalized.speech,
-        schema_version: CURRENT_SETTINGS_SCHEMA,
-        provider: normalized.provider,
-        base_url: normalized.base_url,
-        model: normalized.model,
-        global_shortcut: normalized.global_shortcut,
-        ocr_shortcut: normalized.ocr_shortcut,
-        ocr_engine: normalized.ocr_engine,
-        ocr_language: normalized.ocr_language,
-        cloud_ocr_base_url: normalized.cloud_ocr_base_url,
-        cloud_ocr_model: normalized.cloud_ocr_model,
-        auto_start_enabled: backup.auto_start_enabled,
-    })
+    crate::config::parse_settings_backup(&contents)
 }

@@ -6,7 +6,7 @@ import type {VocabularyEntry} from "../src/types";
 const settle=async()=>{for(let i=0;i<8;i++)await new Promise<void>(r=>setImmediate(r));};
 const entry=(overrides:Partial<VocabularyEntry>={}):VocabularyEntry=>({id:1,word:"architecture",card:{word:"architecture",lemma:"architecture",ipaUk:"",ipaUs:"",partOfSpeech:"n.",definitions:["建筑学"],contextMeaning:"建筑学",examples:[{english:"She studies architecture.",chinese:"她学习建筑学。"}],collocations:[],quizzes:[]},sources:[],status:"new",reviews:0,nextDueAt:null,studiedAt:null,createdAt:1,updatedAt:1,revision:1,contentRevision:1,generationState:"ready",generationError:null,model:"fixture",provider:"test",generatedAt:1,userEdited:false,activeQuiz:null,quizAttempts:0,...overrides});
 async function mount(kind:"collect"|"vocabulary", initial=entry()) {
-  const dom=new JSDOM('<div id="app"></div>',{url:"http://localhost"});
+  const dom=new JSDOM(kind==="collect"?'<div id="app"><section class="popup-shell"></section></div>':'<div id="app"></div>',{url:"http://localhost"});
   const globals=globalThis as unknown as Record<string,unknown>;
   globals.AudioContext=class {async resume(){}};
   for(const name of ["window","document","HTMLElement","HTMLInputElement","HTMLSelectElement","HTMLFormElement","HTMLTextAreaElement","HTMLDialogElement","FormData"]){globals[name]=(dom.window as unknown as Record<string,unknown>)[name];}
@@ -45,6 +45,31 @@ test("collection is explicit, retains context, and rejected generation does not 
 });
 test("batch selection supports local-only collection and per-word sentences",async()=>{
   const m=await mount("collect");try{await m.collector.open("",true);m.el<HTMLInputElement>("#generate-on-collect").checked=false;for(const c of Array.from(m.root.querySelectorAll<HTMLInputElement>('#word-candidates input')).filter(c=>["architecture","curious"].includes(c.value)))c.checked=true;m.el("#confirm-collect").click();await settle();assert.equal(m.calls.filter(c=>c.command==="collect_vocabulary").length,2);assert.equal(m.calls.some(c=>c.command==="generate_vocabulary"),false);}finally{m.close();}
+});
+test("collector uses the rounded popup host, counts unique choices and cancels without collection",async()=>{
+  const m=await mount("collect");try{
+    await m.collector.open("",true);
+    assert.equal(m.collector.dialog.parentElement?.className,"popup-shell");
+    assert.equal(m.collector.dialog.dataset.host,"popup");
+    assert.equal(m.collector.dialog.getAttribute("aria-labelledby"),"collect-title");
+    assert.equal(m.el(".collect-footer").closest(".collect-body"),null);
+    assert.equal(m.el<HTMLDetailsElement>("#collect-source-options").open,false);
+    const word=m.el<HTMLInputElement>('#word-candidates input[value="curious"]');word.checked=true;word.dispatchEvent(new m.dom.window.Event("change",{bubbles:true}));
+    assert.equal(m.el("#collect-count").textContent,"已选 1 / 20");
+    const manual=m.el<HTMLInputElement>("#collect-word");manual.value="curious";manual.dispatchEvent(new m.dom.window.Event("input"));
+    assert.equal(m.el("#collect-count").textContent,"已选 1 / 20");
+    manual.value="resilient";manual.dispatchEvent(new m.dom.window.Event("input"));
+    assert.equal(m.el("#collect-count").textContent,"已选 2 / 20");
+    m.el("#dismiss-collect").click();await settle();
+    assert.equal(m.collector.dialog.open,false);assert.equal(m.calls.at(-1)?.args.open,false);
+    assert.equal(m.calls.some(c=>c.command==="collect_vocabulary"||c.command==="generate_vocabulary"),false);
+    await m.collector.open("architecture");
+    assert.equal(m.el("#collect-candidates-section").hidden,true);
+    assert.equal(m.el("#collect-count").textContent,"已选 1 / 20");
+  }finally{m.close();}
+});
+test("empty collector selection stays open with a readable error and no hidden model calls",async()=>{
+  const m=await mount("collect");try{await m.collector.open("",true);m.el("#confirm-collect").click();await settle();assert.equal(m.collector.dialog.open,true);assert.match(m.el("#collect-status").textContent||"",/1–20/);assert.equal(m.calls.some(c=>c.command==="collect_vocabulary"||c.command==="generate_vocabulary"),false);}finally{m.close();}
 });
 test("review requires revealing answers and early reviews stay disabled",async()=>{
   const m=await mount("vocabulary",entry({status:"review",reviews:1,nextDueAt:1}));try{m.el("#start-review").click();assert.doesNotMatch(m.el("#book-detail").textContent||"",/建筑学/);assert.equal(m.el("#rate-remember"),null);m.el("#reveal-card").click();assert.match(m.el("#book-detail").textContent||"",/建筑学/);m.el("#rate-remember").click();await settle();assert.equal(m.calls.find(c=>c.command==="review_vocabulary")?.args.rating,"remember");assert.equal(m.el<HTMLButtonElement>("#start-review").disabled,true);}finally{m.close();}

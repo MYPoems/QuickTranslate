@@ -49,6 +49,15 @@ const server=createServer((request,response)=>{
 await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
 const output=resolve("artifacts/ui-qa");await mkdir(output,{recursive:true});
 const browser=await chromium.launch({channel:"msedge",headless:true});
+async function transparentCorners(page) {
+  const png=await page.screenshot({omitBackground:true});
+  return page.evaluate(async base64=>{
+    const image=new Image();image.src=`data:image/png;base64,${base64}`;await image.decode();
+    const canvas=document.createElement("canvas");canvas.width=image.width;canvas.height=image.height;
+    const context=canvas.getContext("2d");context.drawImage(image,0,0);
+    return [[0,0],[image.width-1,0],[0,image.height-1],[image.width-1,image.height-1]].map(([x,y])=>context.getImageData(x,y,1,1).data[3]);
+  },png.toString("base64"));
+}
 try {
   for(const [kind,width,height] of [["popup",520,380],["popup",360,180],["settings",820,680],["settings",460,560],["history",860,640],["history",560,460],["vocabulary",860,640],["vocabulary",620,500]]) {
     const page=await browser.newPage({viewport:{width,height}}), errors=[];
@@ -81,8 +90,43 @@ try {
       const bounds=await page.locator("#popup-menu").boundingBox();assert.ok(bounds.x>=0&&bounds.y>=0&&bounds.x+bounds.width<=width&&bounds.y+bounds.height<=height);
       await page.screenshot({path:resolve(output,`popup-${width}-menu.png`)});
       await page.keyboard.press("Escape");assert.equal(await page.locator("#popup-menu").isHidden(),true);
+      for(const theme of ["dark","light"]) {
+        await page.evaluate(theme=>document.documentElement.dataset.theme=theme,theme);
+        assert.deepEqual(await transparentCorners(page),[0,0,0,0],"popup corners start transparent");
+        await page.locator("#more").click();await page.locator("#collect-batch").click();
+        const dialog=page.locator("#collect-dialog");await dialog.waitFor({state:"visible"});
+        assert.equal(await dialog.evaluate(node=>node.parentElement.classList.contains("popup-shell")),true);
+        assert.deepEqual(await transparentCorners(page),[0,0,0,0],"modal must not paint popup's transparent corners");
+        if(theme==="dark") {
+          const regression=await page.addStyleTag({content:'.collect-dialog[data-host="popup"]::backdrop { background: #0006 !important; }'});
+          assert.ok((await transparentCorners(page)).every(alpha=>alpha>0),"negative control reproduces dark corners with rectangular backdrop");
+          await regression.evaluate(node=>node.remove());
+          assert.deepEqual(await transparentCorners(page),[0,0,0,0],"rounded-card mask restores all four transparent corners");
+        }
+        assert.equal(await dialog.evaluate(node=>getComputedStyle(node,"::backdrop").backgroundColor),"rgba(0, 0, 0, 0)");
+        const box=await dialog.boundingBox(), footer=await page.locator(".collect-footer").boundingBox();
+        assert.ok(box.x>=0&&box.y>=0&&box.x+box.width<=width&&box.y+box.height<=height,"collector fits popup");
+        assert.ok(footer.y>=box.y&&footer.y+footer.height<=box.y+box.height,"collection actions always inside dialog");
+        assert.equal(await dialog.evaluate(node=>node.scrollWidth<=node.clientWidth),true,"collector has no horizontal overflow");
+        await page.locator('#word-candidates input[value="curious"]').check();
+        await page.locator("#collect-word").fill("curious");
+        assert.equal(await page.locator("#collect-count").textContent(),"已选 1 / 20");
+        await page.screenshot({path:resolve(output,`collect-${width}-${theme}.png`),omitBackground:true});
+        await page.locator("#collect-source-options summary").click();
+        const expandedFooter=await page.locator(".collect-footer").boundingBox();
+        await page.locator(".collect-body").evaluate(node=>node.scrollTop=node.scrollHeight);
+        assert.deepEqual(await page.locator(".collect-footer").boundingBox(),expandedFooter,"only collector body scrolls");
+        assert.ok(await page.locator(".collect-body").evaluate(node=>node.scrollHeight>node.clientHeight),"expanded description scrolls at popup sizes");
+        await page.keyboard.press("Tab");assert.equal(await dialog.evaluate(node=>node.contains(document.activeElement)),true,"focus remains in modal");
+        await page.keyboard.press("Escape");assert.equal(await dialog.isVisible(),false);
+        assert.deepEqual(await transparentCorners(page),[0,0,0,0],"closing restores transparent corners");
+      }
+      assert.equal(await page.evaluate(()=>window.qa.calls.some(call=>["collect_vocabulary","generate_vocabulary"].includes(call.command))),false,"opening and cancelling never requests collection/generation");
       await page.evaluate(()=>window.qa.emit("translation-state",{requestId:2,status:"success",sourceKind:"selection",result:{sourceText:"pneumonoultramicroscopicsilicovolcanoconiosis",translation:"矽肺病",detectedLanguage:"english",targetLanguage:"chinese",provider:"fixture",model:"test",cached:false}}));
       assert.equal(await page.locator(".actions").evaluate(node=>node.scrollWidth<=node.clientWidth),true,"contextual collect footer overflow");
+      await page.locator("#more").click();await page.locator("#collect-batch").click();
+      assert.equal(await page.locator(".word-candidates").evaluate(node=>node.scrollWidth<=node.clientWidth),true,"long candidate word wraps within collector");
+      await page.locator("#dismiss-collect").click();assert.equal(await page.locator("#collect-dialog").isVisible(),false);
     }
     if(kind==="settings") {
       await page.locator('[name="appearanceTheme"]').selectOption("dark");
@@ -90,6 +134,14 @@ try {
       assert.equal(await page.locator(".appearance-sample").evaluate(node=>getComputedStyle(node).opacity),"1");
       assert.match(await page.locator(".appearance-sample").evaluate(node=>getComputedStyle(node).backgroundColor),/0\.7/);
       for(const tab of ["translation","ocr","speech","learning","maintenance"]) { await page.locator(`[data-settings-tab="${tab}"]`).click(); assert.equal(await page.locator(`#settings-${tab}`).isVisible(),true); }
+    }
+    if(kind==="vocabulary") {
+      await page.locator("#book-add").click();
+      const dialog=page.locator("#collect-dialog");await dialog.waitFor({state:"visible"});
+      assert.equal(await dialog.getAttribute("data-host"),null,"ordinary book modal is not popup-hosted");
+      assert.equal(await dialog.evaluate(node=>getComputedStyle(node,"::backdrop").backgroundColor),"rgba(0, 0, 0, 0.4)","book modal retains ordinary dimming");
+      assert.equal(await page.locator("#collect-candidates-section").isHidden(),true,"manual entry has no empty candidate section");
+      await page.locator("#dismiss-collect").click();assert.equal(await dialog.isVisible(),false);
     }
     assert.deepEqual(errors,[],`${kind} uncaught errors`);console.log(`PASS ${kind} ${width}×${height} light/dark, bounds and rounded corners`);await page.close();
   }

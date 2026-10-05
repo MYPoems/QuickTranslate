@@ -1,5 +1,38 @@
-.collect-dialog { width:min(460px,calc(100vw - 24px)); max-height:calc(100vh - 24px); overflow:auto; padding:18px; }
-.collect-dialog form {display:grid;gap:12px}.collect-dialog header {display:flex;align-items:center;justify-content:space-between}.collect-dialog h2 {font-size:17px;margin:0}
-.collect-dialog label {display:grid;gap:5px;font-size:12px}.collect-dialog input:not([type=checkbox]),.collect-dialog textarea {width:100%;padding:9px;border:1px solid var(--line);border-radius:8px;font:inherit;background:var(--raised);color:var(--text);resize:vertical}
-.collect-dialog button {border:1px solid var(--line);border-radius:8px;padding:8px 12px;background:var(--surface);color:var(--text)}.collect-dialog #confirm-collect {background:var(--accent-strong);color:var(--accent-text);border-color:transparent}
-.collect-note,#collect-status {font-size:12px;line-height:1.6;margin:0;overflow-wrap:anywhere;color:var(--muted)}.word-candidates {display:flex;flex-wrap:wrap;gap:6px;max-height:100px;overflow:auto}.word-candidates label {display:flex;align-items:center;border:1px solid var(--line);border-radius:6px;padding:4px 8px}.collect-dialog .collect-check {display:flex;align-items:center}
+.collect-dialog { width: min(480px, calc(100vw - 24px)); max-height: calc(100vh - 24px); overflow: hidden; padding: 0; border-radius: 14px; background: var(--bg); }
+.collect-dialog[open] { display: flex; flex-direction: column; }
+.collect-dialog form { display: flex; flex-direction: column; width: 100%; min-height: 0; max-height: calc(100vh - 26px); }
+.collect-header { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 44px; padding: 7px 12px; border-bottom: 1px solid var(--line); }
+.collect-header h2 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: 14px; font-weight: 500; }
+.collect-dialog #cancel-collect { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: 0; padding: 6px; background: transparent; color: var(--muted); }
+.collect-dialog #cancel-collect:hover { background: var(--raised); }
+.collect-body { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 12px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.collect-body > * { flex: none; min-width: 0; }
+.collect-dialog label { display: grid; gap: 6px; font-size: 12px; }
+.collect-dialog input:not([type=checkbox]), .collect-dialog textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: var(--surface); color: var(--text); }
+.collect-dialog textarea { resize: vertical; min-height: 60px; max-height: 160px; }
+.collect-dialog button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; background: var(--surface); color: var(--text); font-size: 12px; white-space: nowrap; }
+.collect-dialog #confirm-collect { background: var(--accent-strong); color: var(--accent-text); border-color: var(--accent-strong); }
+.collect-dialog button:not(:disabled):hover { filter: brightness(.96); }
+.collect-note, #collect-status { font-size: 12px; line-height: 1.6; margin: 0; overflow-wrap: anywhere; color: var(--muted); }
+.collect-dialog .section-label { margin: 0 0 7px; }
+.word-candidates { display: flex; flex-wrap: wrap; gap: 6px; }
+.word-candidates label { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 7px; padding: 6px 9px; background: var(--surface); cursor: pointer; overflow-wrap: anywhere; min-width: 0; max-width: 100%; }
+.word-candidates label:has(input:checked) { border-color: var(--accent); background: var(--selected); color: var(--accent); }
+.word-candidates label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+.collect-dialog input[type=checkbox] { flex: none; width: 14px; height: 14px; margin: 0; accent-color: var(--accent-strong); }
+.collect-dialog details { border-top: 1px solid var(--line); padding-top: 9px; }
+.collect-dialog summary { font-size: 12px; color: var(--muted); cursor: pointer; }
+.collect-options { display: grid; gap: 8px; padding-top: 10px; }
+.collect-dialog .collect-check { display: flex; align-items: center; gap: 7px; }
+.collect-generation { display: grid; gap: 5px; }
+.collect-generation .collect-note { font-size: 11px; }
+.collect-footer { flex: none; display: grid; gap: 6px; padding: 9px 12px; border-top: 1px solid var(--line); background: var(--bg); }
+#collect-status { max-height: 48px; overflow: auto; color: var(--accent); scrollbar-width: thin; }
+#collect-status:empty { display: none; }
+.collect-actions, .collect-actions > div { display: flex; align-items: center; gap: 7px; }
+.collect-actions { justify-content: space-between; }
+#collect-count { font-size: 11px; color: var(--muted); white-space: nowrap; }
+/* Native backdrops span the rectangular WebView, including its transparent corners. */
+.collect-dialog[data-host="popup"]::backdrop { background: transparent; }
+.popup-shell:has(> .collect-dialog[open])::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: #0006; pointer-events: none; z-index: 3; }
+@media (max-height: 250px) { .collect-header { min-height: 36px; padding-block: 3px; }.collect-body { padding: 8px 12px; gap: 8px; }.collect-footer { padding-block: 6px; } }

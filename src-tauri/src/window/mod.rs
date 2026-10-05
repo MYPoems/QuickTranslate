@@ -9,6 +9,22 @@ use crate::{app::AppState, platform};
 
 static OCR_OVERLAY_HAS_FOCUS: AtomicBool = AtomicBool::new(false);
 
+pub fn should_hide_popup_on_blur(window: &Window) -> bool {
+    let state = window.app_handle().state::<AppState>();
+    #[cfg(windows)]
+    let foreground = window
+        .hwnd()
+        .ok()
+        .and_then(|handle| platform::window_is_foreground(handle.0 as isize));
+    #[cfg(not(windows))]
+    let foreground = window.is_focused().ok();
+    crate::popup_focus::should_hide_on_blur(
+        state.popup_pinned(),
+        state.vocabulary_collection_open.load(Ordering::Relaxed),
+        foreground,
+    )
+}
+
 pub fn show_vocabulary(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("vocabulary") {
         let _ = window.show();

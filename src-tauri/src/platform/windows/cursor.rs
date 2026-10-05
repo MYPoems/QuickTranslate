@@ -1,8 +1,19 @@
 use windows::Win32::{
-    Foundation::POINT,
+    Foundation::{HWND, POINT},
     Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO, MONITOR_DEFAULTTONEAREST},
-    UI::WindowsAndMessaging::GetCursorPos,
+    UI::WindowsAndMessaging::{GetAncestor, GetCursorPos, GetForegroundWindow, GA_ROOT},
 };
+
+// WebView LostFocus can be synthesized while its native parent is still active,
+// notably when Windows takes over caption dragging or edge resizing.
+pub fn window_is_foreground(handle: isize) -> Option<bool> {
+    let foreground = unsafe { GetForegroundWindow() };
+    if handle == 0 || foreground.0.is_null() {
+        return None;
+    }
+    let root = unsafe { GetAncestor(foreground, GA_ROOT) };
+    Some(root == HWND(handle as *mut std::ffi::c_void))
+}
 
 use crate::{
     errors::AppError,

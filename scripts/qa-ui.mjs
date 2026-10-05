@@ -79,6 +79,7 @@ try {
       const title=await page.locator(".popup-title").boundingBox(), controls=await page.locator(".popup-window-controls").boundingBox();
       assert.ok(drag.width>40&&drag.height>8,"usable blank caption drag area");
       assert.equal(await page.locator(".popup-drag-region").evaluate(node=>getComputedStyle(node).cursor),"default","drag area keeps arrow cursor");
+      assert.equal(await page.locator(".popup-drag-region").getAttribute("title"),null,"drag area has no hover tooltip");
       assert.ok(drag.y>=6&&drag.x>title.x+title.width&&drag.x+drag.width<controls.x,"drag stays inset and outside title/buttons");
       assert.equal(await page.evaluate(()=>{
         const points=[[innerWidth/2,1],[1,innerHeight/2],[innerWidth-2,innerHeight/2],[innerWidth/2,innerHeight-2],[1,1],[innerWidth-2,1],[1,innerHeight-2],[innerWidth-2,innerHeight-2]];

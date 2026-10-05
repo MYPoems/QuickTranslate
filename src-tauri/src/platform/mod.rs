@@ -6,6 +6,9 @@ use crate::{config::OcrLanguage, errors::AppError};
 
 pub use placement::{place_popup, PopupPlacement, WorkArea};
 
+#[cfg(windows)]
+pub use windows::cursor::window_is_foreground;
+
 #[derive(Debug, Clone, Copy)]
 pub struct ScreenBounds {
     pub left: i32,

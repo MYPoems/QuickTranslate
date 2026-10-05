@@ -67,6 +67,7 @@ test("popup native drag is limited to blank caption and popup-only capability", 
     assert.equal(regions.length, 1);
     assert.equal(regions[0], element(".popup-drag-region"));
     assert.equal(regions[0].textContent, "");
+    assert.equal(regions[0].hasAttribute("title"), false, "dragging has no hover tooltip");
     assert.equal(regions[0].querySelector("button, input, textarea"), null);
     for (const selector of [".popup-title", "#pin", "#close", ".content", ".actions"]) {
       assert.equal(element(selector).closest("[data-tauri-drag-region]"), null, selector);

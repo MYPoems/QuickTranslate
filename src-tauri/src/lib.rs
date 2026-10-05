@@ -8,6 +8,7 @@ mod config;
 mod errors;
 mod ocr;
 mod platform;
+mod popup_focus;
 mod providers;
 #[cfg(all(debug_assertions, not(test)))]
 mod qa;
@@ -126,13 +127,7 @@ pub fn run() {
                 let _ = window.hide();
             }
             tauri::WindowEvent::Focused(false)
-                if window.label() == "popup"
-                    && !window.app_handle().state::<AppState>().popup_pinned()
-                    && !window
-                        .app_handle()
-                        .state::<AppState>()
-                        .vocabulary_collection_open
-                        .load(std::sync::atomic::Ordering::Relaxed) =>
+                if window.label() == "popup" && window::should_hide_popup_on_blur(window) =>
             {
                 let _ = window.emit("popup-hidden", ());
                 let _ = window.hide();

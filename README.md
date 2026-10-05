@@ -1,6 +1,6 @@
 # QuickTranslate
 
-当前源码版本：**v1.6.1**。采用 Memo 浅色/深蓝色主题、精简悬浮窗、分类设置、双栏生词本与历史；支持顶部空白区按住拖动、背景透明度、AI 词卡缓存、间隔复习、掌握测试、云端 OCR 与独立朗读。安装包与更新签名见 [v1.6.1 Release](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.6.1)。
+当前版本：**v1.6.2**。统一选词收藏页与悬浮窗设计，修复收藏遮罩的四个暗角、未固定拖动时的失焦收起，并移除拖动区悬停文字提示；保留原生边缘缩放与尺寸记忆。包含 Memo 浅色/深蓝色主题、分类设置、生词本复习、云端 OCR 和独立朗读。安装包与更新签名见 [v1.6.2 Release](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.6.2)。
 
 QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 OCR 翻译工具。它常驻系统托盘：选中文字后按 `Alt + Q` 可划词翻译，按 `Alt + W` 可框选屏幕区域并识别后翻译。v1.2.0 新安装默认推荐自备 API Key 的云端 OCR；Windows OCR 与 PP-OCRv6 Small 本地插件作为显式可选的离线替代。升级保留用户原有引擎选择，已发布 v1.0.0 的默认引擎仍为 Windows OCR。
 
@@ -8,12 +8,12 @@ QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 O
 
 ## 安装正式版（普通用户）
 
-支持 Windows x64。普通用户不需要安装 Git、Node.js、Rust 或 Visual Studio Build Tools。使用 PowerShell 执行以下命令即可下载、校验并运行 `v1.6.1` 安装程序；已有版本可覆盖升级，升级前请备份设置、历史和生词本：
+支持 Windows x64。普通用户不需要安装 Git、Node.js、Rust 或 Visual Studio Build Tools。使用 PowerShell 执行以下命令即可下载、校验并运行 `v1.6.2` 安装程序；已有版本可覆盖升级，升级前请备份设置、历史和生词本：
 
 ```powershell
-$installer = Join-Path $env:TEMP "QuickTranslate_1.6.1_x64-setup.exe"
-Invoke-WebRequest "https://github.com/MYPoems/QuickTranslate/releases/download/v1.6.1/QuickTranslate_1.6.1_x64-setup.exe" -OutFile $installer
-if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "A339D2C8AF45CD2C7D8A07783128673665970AD324C3169CCF5081FD9E661ADF") { Remove-Item -LiteralPath $installer -Force; throw "安装包校验失败，请勿运行" }
+$installer = Join-Path $env:TEMP "QuickTranslate_1.6.2_x64-setup.exe"
+Invoke-WebRequest "https://github.com/MYPoems/QuickTranslate/releases/download/v1.6.2/QuickTranslate_1.6.2_x64-setup.exe" -OutFile $installer
+if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "C5BBBB22ADA062F56C9677DD391D838C89B76DE26E93AF9EF3791AFF5E1211B8") { Remove-Item -LiteralPath $installer -Force; throw "安装包校验失败，请勿运行" }
 Start-Process -FilePath $installer -Wait
 Remove-Item $installer -Force
 ```
@@ -124,12 +124,12 @@ npm run tauri dev
 
 如果已经克隆过项目，可在项目目录中执行 `git pull` 获取最新代码，然后运行 `npm install` 和 `npm run tauri dev`。
 
-## 回滚到当前稳定版
+## 回滚到上一正式版
 
-仓库使用 Git 管理版本，当前稳定基线是 `v1.0.0`。请先保存或提交自己的改动，然后在仓库目录运行：
+仓库使用 Git 管理版本。需要回退本次更新时，可显式检出上一正式版 `v1.6.1`。请先保存或提交自己的改动，并备份用户数据，然后在仓库目录运行（仅回退源码，不卸载应用或恢复数据库）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\rollback-to-stable.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\rollback-to-stable.ps1 -StableVersion v1.6.1
 ```
 
 脚本检测到未提交改动时会拒绝执行，避免误删文件；回滚后处于稳定标签的只读检出状态。需要回到开发主分支时运行：

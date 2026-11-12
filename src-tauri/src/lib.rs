@@ -152,6 +152,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::settings::get_appearance_preferences,
             commands::settings::get_shortcuts,
+            commands::settings::get_key_status,
             commands::vocabulary::set_vocabulary_collection_open,
             commands::vocabulary::open_vocabulary,
             commands::vocabulary::list_vocabulary,

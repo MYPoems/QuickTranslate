@@ -131,12 +131,11 @@ async fn recognize_region(
             })
         }
         OcrEngineKind::Cloud => {
-            let api_key = match app
-                .state::<AppState>()
-                .secrets
-                .get_cloud_ocr_api_key()?
-                .filter(|value| !value.trim().is_empty())
-            {
+            let api_key = match crate::security::get_key(
+                app.state::<AppState>().secrets.as_ref(),
+                crate::security::SecretKind::CloudOcr,
+                &settings.cloud_ocr_base_url,
+            )? {
                 Some(value) => value,
                 None => {
                     return Ok(OcrRegionResult::Completed {

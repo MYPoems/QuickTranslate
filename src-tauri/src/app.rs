@@ -68,11 +68,17 @@ impl AppState {
         let mut secrets: Arc<dyn SecretStore> = Arc::new(KeyringSecretStore);
         #[cfg(debug_assertions)]
         if crate::qa::directory().is_some() {
-            secrets = Arc::new(crate::qa::Secrets::default());
+            secrets = Arc::new(crate::security::MemorySecretStore::default());
         }
         #[cfg(not(debug_assertions))]
         let _ = &mut secrets;
         let settings = Arc::new(SettingsStore::load(config_dir.join("settings.json"))?);
+        // Keys used to be stored one per kind. Bind any such key to the address it has been
+        // used with. A credential store that cannot be read right now must not stop the
+        // application from starting; the keys stay where they are and this runs again.
+        if let Err(error) = crate::security::adopt_legacy_keys(secrets.as_ref(), &settings.get()?) {
+            eprintln!("QuickTranslate: saved keys could not be checked: {error}");
+        }
         let popup_size = Arc::new(PopupSizeStore::load(config_dir.join("popup-window.json")));
         let cache_path = data_dir.join("translations.sqlite3");
         let ocr_plugin_dir = crate::ocr::plugin::plugin_dir(&data_dir);

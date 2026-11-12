@@ -63,6 +63,7 @@ impl TranslationService {
             target_language,
             &settings.provider,
             &settings.model,
+            &settings.base_url,
         );
 
         if use_cache {

@@ -9,7 +9,11 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::{errors::AppError, security::SecretStore, speech::SpeechPreferences};
+use crate::{
+    errors::AppError,
+    security::{get_key, SecretKind, SecretStore},
+    speech::SpeechPreferences,
+};
 
 pub const CURRENT_SETTINGS_SCHEMA: u32 = 5;
 
@@ -210,6 +214,12 @@ impl SettingsStore {
         paddle_ocr_installed: bool,
     ) -> Result<SettingsView, AppError> {
         let settings = self.get()?;
+        let configured = |kind: SecretKind| {
+            get_key(secrets, kind, kind.endpoint(&settings)).map(|key| key.is_some())
+        };
+        let api_key_configured = configured(SecretKind::Translation)?;
+        let cloud_ocr_api_key_configured = configured(SecretKind::CloudOcr)?;
+        let cloud_speech_api_key_configured = configured(SecretKind::CloudSpeech)?;
         Ok(SettingsView {
             appearance: settings.appearance,
             speech: settings.speech,
@@ -222,9 +232,9 @@ impl SettingsStore {
             ocr_language: settings.ocr_language,
             cloud_ocr_base_url: settings.cloud_ocr_base_url,
             cloud_ocr_model: settings.cloud_ocr_model,
-            api_key_configured: secrets.get_api_key()?.is_some(),
-            cloud_ocr_api_key_configured: secrets.get_cloud_ocr_api_key()?.is_some(),
-            cloud_speech_api_key_configured: secrets.get_cloud_speech_api_key()?.is_some(),
+            api_key_configured,
+            cloud_ocr_api_key_configured,
+            cloud_speech_api_key_configured,
             paddle_ocr_installed,
             auto_start_enabled,
         })

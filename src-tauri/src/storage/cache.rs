@@ -296,12 +296,15 @@ fn prune_to_limit(connection: &Connection, limit: i64) -> Result<(), AppError> {
     Ok(())
 }
 
+/// `endpoint` is the service address the result came from. Two services can share a
+/// provider label and a model name; their results must not answer for each other.
 pub fn cache_key(
     normalized_text: &str,
     source: Language,
     target: Language,
     provider: &str,
     model: &str,
+    endpoint: &str,
 ) -> String {
     let mut hasher = Sha256::new();
     for part in [
@@ -310,6 +313,7 @@ pub fn cache_key(
         target.code(),
         provider,
         model,
+        endpoint,
     ] {
         hasher.update((part.len() as u64).to_le_bytes());
         hasher.update(part.as_bytes());
@@ -339,11 +343,29 @@ mod tests {
 
     #[test]
     fn cache_key_is_stable_and_context_sensitive() {
-        let first = cache_key("hello", Language::English, Language::Chinese, "p", "m");
-        let second = cache_key("hello", Language::English, Language::Chinese, "p", "m");
-        let changed = cache_key("hello", Language::English, Language::Chinese, "p", "m2");
-        assert_eq!(first, second);
-        assert_ne!(first, changed);
+        let key = |model, endpoint| {
+            cache_key(
+                "hello",
+                Language::English,
+                Language::Chinese,
+                "p",
+                model,
+                endpoint,
+            )
+        };
+        assert_eq!(
+            key("m", "https://a.example/v1"),
+            key("m", "https://a.example/v1")
+        );
+        assert_ne!(
+            key("m", "https://a.example/v1"),
+            key("m2", "https://a.example/v1")
+        );
+        assert_ne!(
+            key("m", "https://a.example/v1"),
+            key("m", "https://b.example/v1"),
+            "the same model name at another service is another result"
+        );
     }
 
     #[test]

@@ -69,9 +69,26 @@ pub async fn recognize_ocr_region(
     let y = position.y.saturating_add((region.y * scale).round() as i32);
     let width = (region.width * scale).round() as i32;
     let height = (region.height * scale).round() as i32;
-    let settings = app.state::<AppState>().settings.get()?;
     let request_id = begin_ocr_recognition(&app);
+    // The popup now shows "recognising…". Every failure from here on has to reach it as an
+    // error state; returning the error to the (already hidden) overlay would leave it spinning.
+    match recognize_region(&app, request_id, x, y, width, height).await {
+        Ok(result) => Ok(result),
+        Err(error) => Ok(OcrRegionResult::Completed {
+            request_id: finish_ocr_error(&app, request_id, error),
+        }),
+    }
+}
 
+async fn recognize_region(
+    app: &AppHandle,
+    request_id: u64,
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+) -> Result<OcrRegionResult, AppError> {
+    let settings = app.state::<AppState>().settings.get()?;
     match settings.ocr_engine {
         OcrEngineKind::Windows => {
             let language = settings.ocr_language;
@@ -81,7 +98,7 @@ pub async fn recognize_ocr_region(
             .await
             .map_err(|error| AppError::Ocr(error.to_string()))?;
             Ok(OcrRegionResult::Completed {
-                request_id: finish_result(&app, request_id, recognized),
+                request_id: finish_result(app, request_id, recognized),
             })
         }
         OcrEngineKind::Paddle => {
@@ -89,7 +106,7 @@ pub async fn recognize_ocr_region(
                 Ok(paths) => paths,
                 Err(error) => {
                     return Ok(OcrRegionResult::Completed {
-                        request_id: finish_ocr_error(&app, request_id, error),
+                        request_id: finish_ocr_error(app, request_id, error),
                     });
                 }
             };
@@ -102,7 +119,7 @@ pub async fn recognize_ocr_region(
                 Ok(value) => value,
                 Err(error) => {
                     return Ok(OcrRegionResult::Completed {
-                        request_id: finish_ocr_error(&app, request_id, error),
+                        request_id: finish_ocr_error(app, request_id, error),
                     });
                 }
             };
@@ -124,7 +141,7 @@ pub async fn recognize_ocr_region(
                 None => {
                     return Ok(OcrRegionResult::Completed {
                         request_id: finish_ocr_error(
-                            &app,
+                            app,
                             request_id,
                             AppError::Ocr("请先配置云端视觉 OCR API Key".into()),
                         ),
@@ -149,7 +166,7 @@ pub async fn recognize_ocr_region(
                 Err(error) => Err(error),
             };
             Ok(OcrRegionResult::Completed {
-                request_id: finish_result(&app, request_id, recognized),
+                request_id: finish_result(app, request_id, recognized),
             })
         }
     }

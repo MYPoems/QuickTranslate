@@ -73,7 +73,7 @@ export function mountPopup(): void {
     const target = event.target instanceof HTMLElement ? event.target : undefined;
     if (collector.dialog.open || target?.closest('input, textarea, select, [contenteditable="true"]')) return;
     if (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === "c" && currentSource) { event.preventDefault(); void copyText(currentSource, "#copy-source"); }
-    else if (event.ctrlKey && event.key.toLowerCase() === "c" && currentTranslation && !window.getSelection()?.toString()) { event.preventDefault(); void copyText(currentTranslation, "#copy"); }
+    else if (event.ctrlKey && event.key.toLowerCase() === "c" && currentTranslation && !window.getSelection()?.toString()) { event.preventDefault(); void copyText(currentTranslation, "#copy", true); }
     else if (event.altKey && event.key.toLowerCase() === "r" && currentSource) { event.preventDefault(); void retranslate(); }
   });
   void invoke<boolean>("get_popup_pinned").then(updatePin).catch(() => {});
@@ -98,7 +98,9 @@ function sourceSection(content: HTMLElement): void {
 }
 function render(event: TranslationEvent): void {
   if (event.requestId < currentRequestId) return;
-  if (event.requestId > currentRequestId) { selectedWord = ""; selectionSource = ""; }
+  // A new request that fails before any "loading" event (no selection found) has no source of
+  // its own; do not leave the previous request's text on screen and behind the buttons.
+  if (event.requestId > currentRequestId) { selectedWord = ""; selectionSource = ""; if (event.status === "error") currentSource = ""; }
   currentRequestId = event.requestId; stopReading();
   if (event.status === "loading") { localGeneration++; translationStale = false; currentSourceKind = event.sourceKind || "selection"; currentSource = event.sourceText || ""; currentTranslation = ""; }
   else if (event.result) { currentSourceKind = event.sourceKind || currentSourceKind; currentSource = event.result.sourceText; currentTranslation = event.result.translation; translationStale = false; }
@@ -119,9 +121,11 @@ function appendResult(content: HTMLElement, result: TranslationResult): void {
   for (const [className, value] of [["word-detail", [result.partOfSpeech, result.phonetic].filter(Boolean).join(" · ")], ["example", result.example]]) { if (value) { const paragraph = document.createElement("p"); paragraph.className = className!; paragraph.textContent = value; content.append(paragraph); } }
   if (result.definitions?.length) { const list = document.createElement("ul"); list.className = "definitions"; for (const value of result.definitions) { const item = document.createElement("li"); item.textContent = value; list.append(item); } content.append(list); }
 }
-async function copyText(text: string, selector: string): Promise<void> {
+// `shortcut` marks a copy triggered by Ctrl+C. While this window is in front, the selection
+// hotkey's own synthetic Ctrl+C lands here too; the backend skips that one and returns false.
+async function copyText(text: string, selector: string, shortcut = false): Promise<void> {
   if (!text) return; const button = el<HTMLButtonElement>(selector), original = button.innerHTML;
-  try { await invoke("copy_translation", { text }); button.textContent = "已复制"; } catch { button.textContent = "复制失败"; }
+  try { if (await invoke<boolean>("copy_translation", { text, shortcut }) === false) return; button.textContent = "已复制"; } catch { button.textContent = "复制失败"; }
   window.setTimeout(() => { if (button.isConnected) button.innerHTML = original; }, 1200);
 }
 async function retranslate(): Promise<void> {

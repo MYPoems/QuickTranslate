@@ -207,24 +207,36 @@ fn parse_response(
     };
 
     if is_single_english_word(request) {
-        let json = content
-            .strip_prefix("```json")
-            .or_else(|| content.strip_prefix("```"))
-            .unwrap_or(content)
-            .strip_suffix("```")
-            .unwrap_or(content)
-            .trim();
-        if let Ok(dictionary) = serde_json::from_str::<DictionaryResponse>(json) {
-            if !dictionary.translation.trim().is_empty() {
-                result.translation = dictionary.translation;
-                result.phonetic = dictionary.phonetic;
-                result.part_of_speech = dictionary.part_of_speech;
-                result.definitions = dictionary.definitions;
-                result.example = dictionary.example;
-            }
+        // The word prompt asks for JSON, but a model may still answer in plain text; that is
+        // a usable translation. A reply that is JSON-shaped yet unusable is not: showing it
+        // would put raw markup in the popup and, once cached, keep it there.
+        if let Some(json) = dictionary_json(content) {
+            let dictionary = serde_json::from_str::<DictionaryResponse>(json)
+                .ok()
+                .filter(|dictionary| !dictionary.translation.trim().is_empty())
+                .ok_or_else(|| AppError::Provider("模型返回的词义格式无效，请重新翻译".into()))?;
+            result.translation = dictionary.translation.trim().to_string();
+            result.phonetic = dictionary.phonetic;
+            result.part_of_speech = dictionary.part_of_speech;
+            result.definitions = dictionary.definitions;
+            result.example = dictionary.example;
         }
     }
     Ok(result)
+}
+
+/// The JSON object inside a dictionary reply, with any code fence or surrounding remarks
+/// removed. `None` when the reply is not JSON-shaped at all.
+fn dictionary_json(content: &str) -> Option<&str> {
+    let content = content.trim();
+    if !(content.starts_with('{') || content.starts_with("```")) {
+        return None;
+    }
+    match (content.find('{'), content.rfind('}')) {
+        (Some(start), Some(end)) if start < end => Some(&content[start..=end]),
+        // Fenced or opened but never closed: JSON-shaped, and certain to fail parsing.
+        _ => Some(content),
+    }
 }
 
 #[cfg(test)]
@@ -268,6 +280,47 @@ mod tests {
             parse_response(response, &request("architecture"), "Test Provider", "test").unwrap();
         assert_eq!(result.translation, "架构");
         assert_eq!(result.definitions, vec!["体系结构"]);
+    }
+
+    fn word_reply(content: &str) -> Result<TranslationResult, AppError> {
+        let response = ChatResponse {
+            choices: vec![Choice {
+                message: ResponseMessage {
+                    content: content.into(),
+                },
+            }],
+        };
+        parse_response(response, &request("architecture"), "Test Provider", "test")
+    }
+
+    #[test]
+    fn reads_dictionary_json_through_fences_and_surrounding_remarks() {
+        let json = r#"{"translation":"架构","definitions":["体系结构"]}"#;
+        for content in [
+            format!("```json\n{json}\n```"),
+            format!("```\n{json}\n```"),
+            // No closing fence, and a remark after the object.
+            format!("```json\n{json}"),
+            format!("```json\n{json}\n```\n以上是释义。"),
+        ] {
+            let result = word_reply(&content).unwrap();
+            assert_eq!(result.translation, "架构", "{content}");
+            assert_eq!(result.definitions, vec!["体系结构"]);
+        }
+    }
+
+    #[test]
+    fn plain_text_word_reply_is_a_translation_but_broken_json_is_an_error() {
+        assert_eq!(word_reply("架构").unwrap().translation, "架构");
+        for content in [
+            r#"{"translation":"架构","definitions":["#,
+            r#"```json
+{"translation":"#,
+            r#"{"translation":"  "}"#,
+            "```json",
+        ] {
+            assert!(word_reply(content).is_err(), "{content}");
+        }
     }
 
     #[test]

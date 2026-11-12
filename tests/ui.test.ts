@@ -160,6 +160,30 @@ test("popup retains OCR after errors, speaks edits, marks stale bilingual output
   } finally { close(); }
 });
 
+test("popup yields Ctrl+C to an in-flight selection capture and drops the old source when a new request fails outright", async () => {
+  const { element, qa, calls, dom, close } = await mount("popup");
+  try {
+    const original = qa.invoke;
+    // The backend reports false for a shortcut copy that arrives while it is capturing a selection.
+    qa.invoke = async (command, args = {}) => command === "copy_translation" ? (calls.push({ command, args }), !args.shortcut) : original(command, args);
+    qa.emit("translation-state", { requestId: 1, status: "success", sourceKind: "selection", result: { sourceText: "Stay curious.", translation: "保持好奇。", detectedLanguage: "english", targetLanguage: "chinese", provider: "QA", model: "test", cached: false } });
+    assert.equal(element(".original-text").textContent, "Stay curious.");
+
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true })); await settle();
+    assert.deepEqual(calls.filter(call => call.command === "copy_translation").map(call => call.args), [{ text: "保持好奇。", shortcut: true }]);
+    assert.doesNotMatch(element("#copy").textContent || "", /已复制|复制失败/, "a skipped copy leaves the button alone");
+    element("#copy").click(); await settle();
+    assert.equal(calls.filter(call => call.command === "copy_translation").at(-1)?.args.shortcut, false);
+    assert.match(element("#copy").textContent || "", /已复制/);
+
+    qa.emit("translation-state", { requestId: 2, status: "error", error: { code: "NO_SELECTED_TEXT", message: "未检测到选中文字" } });
+    assert.equal(element(".error-message").textContent, "未检测到选中文字");
+    assert.equal(element(".original-text"), null, "the previous request's source is gone");
+    assert.equal(element<HTMLButtonElement>("#copy-source").disabled, true);
+    assert.equal(element<HTMLButtonElement>("#retranslate").disabled, true);
+  } finally { close(); }
+});
+
 test("late retranslation cannot replace a newer retry or screenshot", async () => {
   const { element, qa, dom, close } = await mount("popup");
   try {

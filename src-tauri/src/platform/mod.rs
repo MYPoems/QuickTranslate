@@ -28,16 +28,23 @@ pub async fn get_selected_text() -> Result<String, AppError> {
     Err(AppError::UnsupportedPlatform)
 }
 
-pub async fn copy_text(text: String) -> Result<(), AppError> {
+/// Writes `text` to the clipboard and reports whether it did. A copy that came from a
+/// keyboard shortcut is skipped (`Ok(false)`) while a selection capture is sending its own
+/// Ctrl+C, because that keystroke was not the user's.
+pub async fn copy_text(text: String, from_shortcut: bool) -> Result<bool, AppError> {
     #[cfg(windows)]
     {
+        if from_shortcut && windows::selection::capture_in_flight() {
+            return Ok(false);
+        }
         tokio::task::spawn_blocking(move || windows::clipboard::write_text(&text))
             .await
-            .map_err(|error| AppError::Internal(error.to_string()))?
+            .map_err(|error| AppError::Internal(error.to_string()))??;
+        Ok(true)
     }
     #[cfg(not(windows))]
     {
-        let _ = text;
+        let _ = (text, from_shortcut);
         Err(AppError::UnsupportedPlatform)
     }
 }

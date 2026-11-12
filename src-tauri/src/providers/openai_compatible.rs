@@ -47,6 +47,8 @@ struct ChatRequest<'a> {
     model: &'a str,
     messages: [ChatMessage<'a>; 2],
     temperature: f32,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    stream: bool,
 }
 
 #[derive(Serialize)]
@@ -97,6 +99,7 @@ impl Translator for OpenAiCompatibleProvider {
                 },
             ],
             temperature: 0.1,
+            stream: false,
         };
 
         let mut attempt = 0;
@@ -155,6 +158,185 @@ impl Translator for OpenAiCompatibleProvider {
             &self.config.provider,
             &self.config.model,
         )
+    }
+}
+
+/// How long a streamed reply may take to begin, and how long it may pause between pieces.
+/// A long translation is no longer cut off by a limit on its total duration.
+const STREAM_START_TIMEOUT: Duration = Duration::from_secs(30);
+const STREAM_IDLE_TIMEOUT: Duration = Duration::from_secs(30);
+const STREAM_TOTAL_LIMIT: Duration = Duration::from_secs(600);
+
+impl OpenAiCompatibleProvider {
+    /// Translates like [`Translator::translate`], and calls `on_text` with everything
+    /// translated so far each time more arrives, so the reader sees the beginning while the
+    /// rest is still being written.
+    ///
+    /// Single-word lookups are not streamed: their reply is JSON that is only usable whole.
+    /// A service that refuses or ignores the streaming request is asked again the ordinary
+    /// way; `on_text` is then simply never called.
+    pub async fn translate_stream(
+        &self,
+        request: TranslationRequest,
+        mut on_text: impl FnMut(&str) + Send,
+    ) -> Result<TranslationResult, AppError> {
+        if is_single_english_word(&request) {
+            return self.translate(request).await;
+        }
+        let system_prompt = build_system_prompt(&request);
+        let body = ChatRequest {
+            model: &self.config.model,
+            messages: [
+                ChatMessage {
+                    role: "system",
+                    content: &system_prompt,
+                },
+                ChatMessage {
+                    role: "user",
+                    content: &request.text,
+                },
+            ],
+            temperature: 0.1,
+            stream: true,
+        };
+        let mut builder = self
+            .client
+            .post(self.endpoint())
+            .timeout(STREAM_TOTAL_LIMIT)
+            .json(&body);
+        if !self.config.api_key.is_empty() {
+            builder = builder.bearer_auth(&self.config.api_key);
+        }
+        let mut response = match tokio::time::timeout(STREAM_START_TIMEOUT, builder.send()).await {
+            Ok(Ok(response)) => response,
+            Ok(Err(error)) => return Err(map_reqwest_error(error)),
+            Err(_) => return Err(AppError::Network("the service did not respond".into())),
+        };
+        // Refusals and transient failures go through the ordinary path, which knows how to
+        // retry them and how to explain them.
+        if !response.status().is_success() {
+            return self.translate(request).await;
+        }
+        let event_stream = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.contains("text/event-stream"));
+        if !event_stream {
+            // The service answered in one piece despite being asked to stream.
+            let response: ChatResponse = response
+                .json()
+                .await
+                .map_err(|error| AppError::Provider(format!("API 响应格式无效: {error}")))?;
+            return parse_response(
+                response,
+                &request,
+                &self.config.provider,
+                &self.config.model,
+            );
+        }
+
+        let mut events = EventStream::default();
+        let mut translation = String::new();
+        while !events.finished {
+            let chunk = match tokio::time::timeout(STREAM_IDLE_TIMEOUT, response.chunk()).await {
+                Ok(Ok(Some(chunk))) => chunk,
+                Ok(Ok(None)) => break,
+                Ok(Err(error)) => return Err(map_reqwest_error(error)),
+                Err(_) => {
+                    return Err(AppError::Network(
+                        "the service stopped sending the translation".into(),
+                    ))
+                }
+            };
+            let before = translation.len();
+            for piece in events.push(&chunk)? {
+                translation.push_str(&piece);
+            }
+            if translation.len() > before && !translation.trim().is_empty() {
+                on_text(translation.trim_start());
+            }
+        }
+        let translation = translation.trim();
+        if translation.is_empty() {
+            return Err(AppError::Provider("API 返回了空译文".into()));
+        }
+        Ok(TranslationResult {
+            source_text: request.text.clone(),
+            translation: translation.to_string(),
+            detected_language: request.source_language,
+            target_language: request.target_language,
+            provider: self.config.provider.clone(),
+            model: self.config.model.clone(),
+            cached: false,
+            phonetic: None,
+            part_of_speech: None,
+            definitions: vec![],
+            example: None,
+        })
+    }
+}
+
+/// Reads a `text/event-stream` body as it arrives, in pieces of any size, and yields the
+/// text carried by each complete event.
+#[derive(Default)]
+struct EventStream {
+    pending: Vec<u8>,
+    finished: bool,
+}
+
+#[derive(Deserialize)]
+struct StreamEvent {
+    #[serde(default)]
+    choices: Vec<StreamChoice>,
+    error: Option<serde_json::Value>,
+}
+
+#[derive(Deserialize)]
+struct StreamChoice {
+    delta: Option<StreamDelta>,
+}
+
+#[derive(Deserialize)]
+struct StreamDelta {
+    content: Option<String>,
+}
+
+impl EventStream {
+    fn push(&mut self, bytes: &[u8]) -> Result<Vec<String>, AppError> {
+        if self.finished {
+            return Ok(Vec::new());
+        }
+        self.pending.extend_from_slice(bytes);
+        let mut pieces = Vec::new();
+        // Only whole lines are decoded, so a character split across two chunks is never
+        // read half-way.
+        while let Some(end) = self.pending.iter().position(|byte| *byte == b'\n') {
+            let line: Vec<u8> = self.pending.drain(..=end).collect();
+            let line = String::from_utf8_lossy(&line);
+            let Some(data) = line.trim().strip_prefix("data:") else {
+                continue;
+            };
+            let data = data.trim();
+            if data == "[DONE]" {
+                self.finished = true;
+                break;
+            }
+            let Ok(event) = serde_json::from_str::<StreamEvent>(data) else {
+                continue;
+            };
+            if event.error.is_some() {
+                return Err(AppError::Provider("翻译服务在生成译文时报告了错误".into()));
+            }
+            pieces.extend(
+                event
+                    .choices
+                    .into_iter()
+                    .filter_map(|choice| choice.delta.and_then(|delta| delta.content))
+                    .filter(|content| !content.is_empty()),
+            );
+        }
+        Ok(pieces)
     }
 }
 
@@ -321,6 +503,65 @@ mod tests {
         ] {
             assert!(word_reply(content).is_err(), "{content}");
         }
+    }
+
+    #[test]
+    fn event_stream_survives_any_chunk_boundary() {
+        let body = concat!(
+            ": keep-alive\n\n",
+            "data: {\"choices\":[{\"delta\":{\"role\":\"assistant\",\"content\":\"\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"保持\"}}]}\r\n\r\n",
+            "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"好奇，\"}}]}\n\n",
+            "data:{\"choices\":[{\"delta\":{\"content\":\"持续学习。\"},\"finish_reason\":\"stop\"}]}\n\n",
+            "data: [DONE]\n\n",
+            "data: {\"choices\":[{\"delta\":{\"content\":\"ignored\"}}]}\n\n",
+        )
+        .as_bytes();
+        // Every split position, including the middle of a multi-byte character.
+        for split in 0..=body.len() {
+            let mut events = EventStream::default();
+            let mut text = String::new();
+            for chunk in [&body[..split], &body[split..]] {
+                for piece in events.push(chunk).unwrap() {
+                    text.push_str(&piece);
+                }
+            }
+            assert_eq!(text, "保持好奇，持续学习。", "split at {split}");
+            assert!(events.finished);
+        }
+    }
+
+    #[test]
+    fn event_stream_reports_an_error_event() {
+        let mut events = EventStream::default();
+        assert!(events
+            .push(b"data: {\"error\":{\"message\":\"quota\"}}\n\n")
+            .is_err());
+    }
+
+    #[test]
+    fn streaming_is_requested_only_when_asked() {
+        let request = |stream| {
+            serde_json::to_value(ChatRequest {
+                model: "m",
+                messages: [
+                    ChatMessage {
+                        role: "system",
+                        content: "s",
+                    },
+                    ChatMessage {
+                        role: "user",
+                        content: "u",
+                    },
+                ],
+                temperature: 0.1,
+                stream,
+            })
+            .unwrap()
+        };
+        assert_eq!(request(true)["stream"], true);
+        assert!(request(false).get("stream").is_none());
     }
 
     #[test]

@@ -297,7 +297,13 @@ async fn translate_request(
         }
     };
     let Some(outcome) = cancellation
-        .run_until_cancelled(state.translation.translate(source_text, settings, api_key))
+        .run_until_cancelled(state.translation.translate_streaming(
+            source_text,
+            settings,
+            api_key,
+            true,
+            delta_emitter(&app, request_id, None),
+        ))
         .await
     else {
         return;
@@ -321,6 +327,50 @@ async fn translate_request(
             );
         }
         Err(error) => show_error(&app, request_id, error, false),
+    }
+}
+
+/// The translation written so far, sent to the popup while the rest is still arriving.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeltaPayload<'a> {
+    request_id: u64,
+    /// Set for a retranslation the popup started itself, to tell its attempts apart.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generation: Option<u64>,
+    text: &'a str,
+}
+
+/// How often the popup is updated while a translation streams in. Pieces arrive far more
+/// often than a reader can follow or a window needs to repaint.
+const DELTA_INTERVAL: Duration = Duration::from_millis(50);
+
+/// A callback for [`TranslationService::translate_streaming`] that forwards the partial
+/// translation to the popup, as long as `request_id` is still the request on screen.
+pub(crate) fn delta_emitter(
+    app: &AppHandle,
+    request_id: u64,
+    generation: Option<u64>,
+) -> impl FnMut(&str) + Send {
+    let app = app.clone();
+    let mut last_sent: Option<std::time::Instant> = None;
+    move |text: &str| {
+        if last_sent.is_some_and(|sent| sent.elapsed() < DELTA_INTERVAL) {
+            return;
+        }
+        if !app.state::<AppState>().is_latest(request_id) {
+            return;
+        }
+        last_sent = Some(std::time::Instant::now());
+        let _ = app.emit_to(
+            "popup",
+            "translation-delta",
+            DeltaPayload {
+                request_id,
+                generation,
+                text,
+            },
+        );
     }
 }
 

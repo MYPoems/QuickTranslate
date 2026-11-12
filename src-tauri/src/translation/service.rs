@@ -47,12 +47,39 @@ impl TranslationService {
         self.translate_inner(text, settings, api_key, false).await
     }
 
+    /// Translates and reports the text produced so far through `on_text` as it arrives.
+    /// A cached result, a single-word lookup and a service that does not stream all finish
+    /// without `on_text` being called.
+    pub async fn translate_streaming(
+        &self,
+        text: String,
+        settings: AppSettings,
+        api_key: String,
+        use_cache: bool,
+        on_text: impl FnMut(&str) + Send,
+    ) -> Result<TranslationResult, AppError> {
+        self.translate_with(text, settings, api_key, use_cache, Some(on_text))
+            .await
+    }
+
     async fn translate_inner(
         &self,
         text: String,
         settings: AppSettings,
         api_key: String,
         use_cache: bool,
+    ) -> Result<TranslationResult, AppError> {
+        self.translate_with(text, settings, api_key, use_cache, None::<fn(&str)>)
+            .await
+    }
+
+    async fn translate_with(
+        &self,
+        text: String,
+        settings: AppSettings,
+        api_key: String,
+        use_cache: bool,
+        on_text: Option<impl FnMut(&str) + Send>,
     ) -> Result<TranslationResult, AppError> {
         let text = normalize_text(&text)?;
         let source_language = detect_language(&text);
@@ -85,13 +112,16 @@ impl TranslationService {
                 model: settings.model,
             },
         );
-        let result = provider
-            .translate(TranslationRequest {
-                text,
-                source_language,
-                target_language,
-            })
-            .await?;
+        let request = TranslationRequest {
+            text,
+            source_language,
+            target_language,
+        };
+        // Only a finished translation is cached; a stream that fails half-way leaves nothing.
+        let result = match on_text {
+            Some(on_text) => provider.translate_stream(request, on_text).await?,
+            None => provider.translate(request).await?,
+        };
 
         let cache = Arc::clone(&self.cache);
         let cached_result = result.clone();

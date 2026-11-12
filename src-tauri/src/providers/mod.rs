@@ -1,4 +1,6 @@
 mod openai_compatible;
+#[cfg(test)]
+mod stream_tests;
 
 use async_trait::async_trait;
 

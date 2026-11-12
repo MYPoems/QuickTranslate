@@ -22,15 +22,39 @@ pub async fn translate_text(text: String, app: AppHandle) -> Result<TranslationR
     state.translation.translate(text, settings, api_key).await
 }
 
+/// Translates again, bypassing the cache. When the popup passes the request it is showing
+/// (`request_id`) and which of its own attempts this is (`generation`), the text is also
+/// streamed to it as it arrives.
 #[tauri::command]
-pub async fn retranslate_text(text: String, app: AppHandle) -> Result<TranslationResult, AppError> {
+pub async fn retranslate_text(
+    text: String,
+    request_id: Option<u64>,
+    generation: Option<u64>,
+    app: AppHandle,
+) -> Result<TranslationResult, AppError> {
     let state = app.state::<AppState>();
     let settings = state.settings.get()?;
     let api_key = provider_api_key(&settings, state.secrets.as_ref())?;
-    state
-        .translation
-        .translate_fresh(text, settings, api_key)
-        .await
+    match request_id {
+        Some(request_id) => {
+            state
+                .translation
+                .translate_streaming(
+                    text,
+                    settings,
+                    api_key,
+                    false,
+                    crate::app::delta_emitter(&app, request_id, generation),
+                )
+                .await
+        }
+        None => {
+            state
+                .translation
+                .translate_fresh(text, settings, api_key)
+                .await
+        }
+    }
 }
 
 #[tauri::command]

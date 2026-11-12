@@ -131,12 +131,11 @@ async fn recognize_region(
             })
         }
         OcrEngineKind::Cloud => {
-            let api_key = match app
-                .state::<AppState>()
-                .secrets
-                .get_cloud_ocr_api_key()?
-                .filter(|value| !value.trim().is_empty())
-            {
+            let api_key = match crate::security::get_key(
+                app.state::<AppState>().secrets.as_ref(),
+                crate::security::SecretKind::CloudOcr,
+                &settings.cloud_ocr_base_url,
+            )? {
                 Some(value) => value,
                 None => {
                     return Ok(OcrRegionResult::Completed {
@@ -155,13 +154,15 @@ async fn recognize_region(
             .map_err(|error| AppError::Ocr(error.to_string()))?;
             let recognized = match screenshot {
                 Ok(png) => {
-                    cloud::recognize(
-                        &app.state::<AppState>().http_client,
-                        &settings,
-                        &api_key,
-                        &png,
-                    )
-                    .await
+                    // The upload and the recognition can take a while; the user may cancel.
+                    let state = app.state::<AppState>();
+                    let cancelled = state.active_token();
+                    let recognition =
+                        cloud::recognize(&state.http_client, &settings, &api_key, &png);
+                    match cancelled.run_until_cancelled(recognition).await {
+                        Some(recognized) => recognized,
+                        None => return Ok(OcrRegionResult::Completed { request_id }),
+                    }
                 }
                 Err(error) => Err(error),
             };
@@ -170,6 +171,63 @@ async fn recognize_region(
             })
         }
     }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudOcrTest {
+    elapsed_ms: u64,
+    /// Whether the reply contained the text of the built-in test picture.
+    recognized: bool,
+}
+
+/// Checks the cloud OCR settings in the form, saved or not, against the built-in test
+/// picture. Nothing from the screen is uploaded.
+#[tauri::command]
+pub async fn test_cloud_ocr(
+    update: crate::config::UpdateSettings,
+    app: AppHandle,
+) -> Result<CloudOcrTest, AppError> {
+    let settings = crate::config::SettingsStore::validate(&update)?;
+    if settings.cloud_ocr_base_url.is_empty() {
+        return Err(AppError::invalid(
+            "cloudOcrBaseUrl",
+            "请先填写云端 OCR 服务地址",
+        ));
+    }
+    if settings.cloud_ocr_model.is_empty() {
+        return Err(AppError::invalid(
+            "cloudOcrModel",
+            "请先填写云端 OCR 模型名称",
+        ));
+    }
+    let state = app.state::<AppState>();
+    let [_, cloud_ocr, _] = crate::commands::settings::key_changes(&update);
+    let api_key = cloud_ocr
+        .effective(state.secrets.as_ref(), &settings.cloud_ocr_base_url)?
+        .ok_or_else(|| {
+            AppError::invalid(
+                "cloudOcrApiKey",
+                "请填写这个服务地址的云端 OCR API Key 后再测试",
+            )
+        })?;
+    let started = std::time::Instant::now();
+    let recognized = match cloud::recognize(
+        &state.http_client,
+        &settings,
+        &api_key,
+        cloud::CONNECTION_TEST_IMAGE,
+    )
+    .await
+    {
+        Ok(text) => text.to_lowercase().contains(cloud::CONNECTION_TEST_WORD),
+        Err(AppError::OcrNoText) => false,
+        Err(error) => return Err(error),
+    };
+    Ok(CloudOcrTest {
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        recognized,
+    })
 }
 
 #[tauri::command]
@@ -186,8 +244,11 @@ pub fn complete_paddle_ocr(request_id: u64, text: String, app: AppHandle) -> Res
 
 #[tauri::command]
 pub fn fail_paddle_ocr(request_id: u64, message: String, app: AppHandle) -> Result<u64, AppError> {
-    let mut message = message.replace(['\r', '\n'], " ");
-    message.truncate(240);
+    let message: String = message
+        .replace(['\r', '\n'], " ")
+        .chars()
+        .take(240)
+        .collect();
     Ok(finish_ocr_error(
         &app,
         request_id,
@@ -214,6 +275,18 @@ pub fn uninstall_paddle_ocr_plugin(
     app: AppHandle,
 ) -> Result<plugin::PaddleOcrPluginStatus, AppError> {
     plugin::uninstall(&app.state::<AppState>().ocr_plugin_dir)
+}
+
+/// Opens the screenshot overlay again, for the popup's "select again".
+#[tauri::command]
+pub fn start_ocr_selection(app: AppHandle) {
+    if app
+        .get_webview_window("ocr")
+        .is_some_and(|window| window.is_visible().unwrap_or(false))
+    {
+        return;
+    }
+    crate::window::toggle_ocr_overlay(&app);
 }
 
 #[tauri::command]

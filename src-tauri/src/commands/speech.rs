@@ -24,7 +24,12 @@ pub async fn stream_cloud_speech(
     if settings.provider != crate::speech::SpeechProvider::Cloud {
         return Err(AppError::Speech("请先在设置中选择云端朗读".into()));
     }
-    let key = state.secrets.get_cloud_speech_api_key()?.ok_or_else(|| {
+    let key = crate::security::get_key(
+        state.secrets.as_ref(),
+        crate::security::SecretKind::CloudSpeech,
+        &settings.cloud_endpoint,
+    )?
+    .ok_or_else(|| {
         AppError::Speech("尚未配置云端朗读 API Key；请打开设置配置，或手动选择离线朗读".into())
     })?;
     let service = state.cloud_speech.clone();
@@ -56,7 +61,11 @@ pub async fn test_cloud_speech(
         update
             .cloud_speech_api_key
             .filter(|key| !key.trim().is_empty())
-            .or(state.secrets.get_cloud_speech_api_key()?)
+            .or(crate::security::get_key(
+                state.secrets.as_ref(),
+                crate::security::SecretKind::CloudSpeech,
+                &settings.cloud_endpoint,
+            )?)
     }
     .ok_or_else(|| AppError::Speech("请填写云端朗读 API Key 后测试".into()))?;
     // Isolated test session: never changes saved settings or interrupts current reading.

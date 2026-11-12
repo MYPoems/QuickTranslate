@@ -13,6 +13,8 @@ let dragging = false;
 let submitting = false;
 let paddleOcr: Promise<PaddleEngine> | undefined;
 let paddleModelKey = "";
+// Roughly where a screenshot of ordinary content starts to exceed the upload limit.
+const LARGE_REGION_PIXELS = 5_000_000;
 
 export function mountOcr(): void {
   root.innerHTML = `
@@ -21,7 +23,7 @@ export function mountOcr(): void {
         <strong>拖动鼠标选择要识别的文字区域</strong>
         <span>松开后自动识别并翻译 · Esc 取消</span>
       </div>
-      <div id="ocr-selection" class="ocr-selection" hidden></div>
+      <div id="ocr-selection" class="ocr-selection" hidden><span id="ocr-size" class="ocr-size"></span></div>
       <p id="ocr-status" class="ocr-status" hidden>正在识别…</p>
     </main>`;
   const surface = root.querySelector<HTMLElement>("#ocr-surface")!;
@@ -151,6 +153,15 @@ function updateSelection(x1: number, y1: number, x2: number, y2: number): void {
   selection.style.top = `${Math.min(y1, y2)}px`;
   selection.style.width = `${Math.abs(x2 - x1)}px`;
   selection.style.height = `${Math.abs(y2 - y1)}px`;
+  // The size in screen pixels, which is what gets captured. A very large region has to be
+  // scaled down before a cloud model can take it, and small text suffers.
+  const scale = window.devicePixelRatio || 1;
+  const width = Math.round(Math.abs(x2 - x1) * scale);
+  const height = Math.round(Math.abs(y2 - y1) * scale);
+  const size = root.querySelector<HTMLElement>("#ocr-size")!;
+  const large = width * height > LARGE_REGION_PIXELS;
+  size.textContent = large ? `${width} × ${height} · 区域较大，小字可能识别不清` : `${width} × ${height}`;
+  size.dataset.large = String(large);
 }
 
 function reset(): void {

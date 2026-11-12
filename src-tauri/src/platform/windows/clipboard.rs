@@ -5,12 +5,13 @@ use windows::Win32::{
     System::{
         DataExchange::{
             CloseClipboard, CountClipboardFormats, EmptyClipboard, GetClipboardData,
-            GetClipboardSequenceNumber, IsClipboardFormatAvailable, OpenClipboard,
-            SetClipboardData,
+            GetClipboardOwner, GetClipboardSequenceNumber, IsClipboardFormatAvailable,
+            OpenClipboard, SetClipboardData,
         },
         Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE},
         Ole::CF_UNICODETEXT,
     },
+    UI::WindowsAndMessaging::GetWindowThreadProcessId,
 };
 
 use crate::errors::AppError;
@@ -42,6 +43,14 @@ pub struct Snapshot {
 /// Changes every time any application modifies the clipboard.
 pub fn sequence_number() -> u32 {
     unsafe { GetClipboardSequenceNumber() }
+}
+
+/// The process that last put data on the clipboard, when it named a window as owner.
+pub fn owner_process() -> Option<u32> {
+    let owner = unsafe { GetClipboardOwner() }.ok()?;
+    let mut process = 0;
+    unsafe { GetWindowThreadProcessId(owner, Some(&mut process)) };
+    (process != 0).then_some(process)
 }
 
 /// Whether plain text has been published. Does not open the clipboard, so it can never

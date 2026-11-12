@@ -8,9 +8,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
-    VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+use windows::Win32::UI::{
+    Input::KeyboardAndMouse::{
+        GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+        VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+    },
+    WindowsAndMessaging::{
+        GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, GUITHREADINFO,
+    },
 };
 
 use crate::errors::AppError;
@@ -69,22 +74,76 @@ pub fn capture_in_flight() -> bool {
             .is_some_and(|ended| ended.elapsed() < CAPTURE_ECHO)
 }
 
+/// What the most recent capture did, step by step, for the diagnostics view. It holds
+/// timings and yes/no answers only: nothing about the window, the document or the text.
+#[derive(Debug, Clone, Copy)]
+pub struct CaptureReport {
+    pub finished: Instant,
+    pub total_ms: u32,
+    /// How long the shortcut's keys were still held after it fired.
+    pub release_wait_ms: u32,
+    /// `false` when the keys were held past the limit and nothing was sent.
+    pub keys_released: bool,
+    pub clipboard_changed: bool,
+    pub text_found: bool,
+    /// Whether the clipboard change came from the application in front.
+    pub written_by_target: bool,
+    /// `None` when there was nothing to put back.
+    pub clipboard_restored: Option<bool>,
+}
+
+static LAST_REPORT: Mutex<Option<CaptureReport>> = Mutex::new(None);
+
+pub fn last_capture_report() -> Option<CaptureReport> {
+    LAST_REPORT.lock().ok().and_then(|report| *report)
+}
+
 pub fn capture_selected_text() -> Result<String, AppError> {
     let _serial = CAPTURE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     let _activity = CaptureActivity::begin();
 
+    let started = Instant::now();
+    let mut report = CaptureReport {
+        finished: started,
+        total_ms: 0,
+        release_wait_ms: 0,
+        keys_released: false,
+        clipboard_changed: false,
+        text_found: false,
+        written_by_target: false,
+        clipboard_restored: None,
+    };
+    let result = run_capture(&mut report);
+    report.finished = Instant::now();
+    report.total_ms = millis(started.elapsed());
+    if let Ok(mut last) = LAST_REPORT.lock() {
+        *last = Some(report);
+    }
+    result
+}
+
+fn millis(duration: Duration) -> u32 {
+    u32::try_from(duration.as_millis()).unwrap_or(u32::MAX)
+}
+
+fn run_capture(report: &mut CaptureReport) -> Result<String, AppError> {
     // Must happen first, while the hotkey's modifiers are still physically held.
     mask_held_modifiers()?;
+    let waiting = Instant::now();
     // Never release the user's keys for them: a synthetic Alt-up makes the target see a lone
     // Alt tap (Office then moves focus to the ribbon, Windows 11 Notepad to its menu, and
     // the copy below never reaches the document), and a still-held letter key would start
     // typing into the selection once Alt reads as up.
-    wait_for_modifier_release()?;
+    let released = wait_for_modifier_release();
+    report.release_wait_ms = millis(waiting.elapsed());
+    released?;
+    report.keys_released = true;
 
     let original = with_retries(|| clipboard::snapshot().ok());
     let original_sequence = clipboard::sequence_number();
+    let targets = target_processes();
 
     send_copy_shortcut()?;
 
@@ -112,16 +171,61 @@ pub fn capture_selected_text() -> Result<String, AppError> {
     // Decided once, right after the copy was observed. The sequence number cannot be used to
     // detect a later copy by the user here: reading delay-rendered data (ours above, and the
     // clipboard history service's) advances it as well.
-    let restored = match plan_restore(original.as_ref(), copy_landed) {
-        Restore::Keep => Some(()),
-        Restore::Text(text) => with_retries(|| clipboard::write_text(text).ok()),
-        Restore::Clear => with_retries(|| clipboard::clear().ok()),
+    //
+    // A change is only undone when the target wrote it. Anything another program happened to
+    // put there in the meantime (a clipboard manager, a sync from another device) is not our
+    // copy, and replacing it with the old text would destroy it.
+    let ours = copy_landed && written_by_target(clipboard::owner_process(), &targets);
+    report.clipboard_changed = copy_landed;
+    report.text_found = captured.is_some();
+    report.written_by_target = ours;
+    report.clipboard_restored = match plan_restore(original.as_ref(), ours) {
+        Restore::Keep => None,
+        Restore::Text(text) => Some(with_retries(|| clipboard::write_text(text).ok()).is_some()),
+        Restore::Clear => Some(with_retries(|| clipboard::clear().ok()).is_some()),
     };
-    if cfg!(debug_assertions) && restored.is_none() {
-        eprintln!("QuickTranslate: original clipboard content could not be restored");
-    }
 
     captured.ok_or(AppError::NoSelectedText)
+}
+
+/// The processes a copy by the foreground application can come from: the one owning its
+/// top-level window and the one owning its focused control. They differ for hosted
+/// applications, where a frame host owns the window and the application the content.
+fn target_processes() -> Vec<u32> {
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground.0.is_null() {
+        return Vec::new();
+    }
+    let mut processes = Vec::with_capacity(2);
+    let mut process = 0;
+    let thread = unsafe { GetWindowThreadProcessId(foreground, Some(&mut process)) };
+    if process != 0 {
+        processes.push(process);
+    }
+    let mut info = GUITHREADINFO {
+        cbSize: size_of::<GUITHREADINFO>() as u32,
+        ..Default::default()
+    };
+    if thread != 0 && unsafe { GetGUIThreadInfo(thread, &mut info) }.is_ok() {
+        let mut focused = 0;
+        if !info.hwndFocus.0.is_null() {
+            unsafe { GetWindowThreadProcessId(info.hwndFocus, Some(&mut focused)) };
+        }
+        if focused != 0 && !processes.contains(&focused) {
+            processes.push(focused);
+        }
+    }
+    processes
+}
+
+/// Whether the clipboard's current content was put there by the application the copy
+/// shortcut went to. An owner that cannot be identified is given the benefit of the doubt:
+/// the alternative is to stop restoring for every application that copies without one.
+fn written_by_target(owner: Option<u32>, targets: &[u32]) -> bool {
+    match owner {
+        Some(owner) => targets.is_empty() || targets.contains(&owner),
+        None => true,
+    }
 }
 
 /// Clipboard listeners (clipboard history, vendor utilities) briefly hold the clipboard open
@@ -251,6 +355,15 @@ mod tests {
         assert_eq!(plan_restore(Some(&original), true), Restore::Text("before"));
         // The copy never happened: the clipboard still holds what it held.
         assert_eq!(plan_restore(Some(&original), false), Restore::Keep);
+    }
+
+    #[test]
+    fn only_a_copy_written_by_the_target_counts_as_ours() {
+        assert!(written_by_target(Some(7), &[7, 9]));
+        assert!(written_by_target(Some(9), &[7, 9]));
+        assert!(!written_by_target(Some(8), &[7, 9]), "another program");
+        assert!(written_by_target(None, &[7, 9]), "owner not identifiable");
+        assert!(written_by_target(Some(8), &[]), "target not identifiable");
     }
 
     #[test]

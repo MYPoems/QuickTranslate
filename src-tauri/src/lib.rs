@@ -97,6 +97,11 @@ pub fn run() {
             app.global_shortcut()
                 .register(settings.ocr_shortcut.as_str())?;
             tray::setup(app)?;
+            // A new installation has no key yet; without the guide the first shortcut press
+            // would only say so, and the settings are otherwise reachable from the tray alone.
+            if commands::settings::needs_onboarding(app.handle()) {
+                window::show_settings(app.handle());
+            }
             if std::env::args().any(|arg| arg == "--vocabulary") {
                 window::show_vocabulary(app.handle());
             }
@@ -151,6 +156,13 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::settings::get_appearance_preferences,
+            commands::settings::get_shortcuts,
+            commands::settings::get_key_status,
+            commands::settings::check_shortcut,
+            commands::settings::open_api_key_page,
+            commands::settings::get_onboarding,
+            commands::settings::complete_onboarding,
+            commands::ocr::test_cloud_ocr,
             commands::vocabulary::set_vocabulary_collection_open,
             commands::vocabulary::open_vocabulary,
             commands::vocabulary::list_vocabulary,
@@ -180,9 +192,14 @@ pub fn run() {
             commands::translation::translate_selected_text,
             commands::translation::translate_text,
             commands::translation::retranslate_text,
+            commands::translation::translate_input,
+            commands::translation::open_settings,
+            commands::translation::cancel_request,
+            commands::ocr::start_ocr_selection,
             commands::translation::copy_translation,
             commands::translation::clear_translation_cache,
             commands::translation::list_translation_history,
+            commands::translation::clear_translation_history,
             commands::translation::open_history_translation,
             commands::translation::set_history_favorite,
             commands::translation::delete_history_entry,

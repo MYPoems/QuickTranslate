@@ -35,7 +35,6 @@ pub struct AppState {
     pub vocabulary: Arc<crate::vocabulary::VocabularyStore>,
     pub vocabulary_generation: tokio::sync::Semaphore,
     latest_request: AtomicU64,
-    popup_pinned: AtomicBool,
     pub vocabulary_collection_open: AtomicBool,
     active_request: Mutex<CancellationToken>,
     last_error: RwLock<Option<DiagnosticError>>,
@@ -68,11 +67,17 @@ impl AppState {
         let mut secrets: Arc<dyn SecretStore> = Arc::new(KeyringSecretStore);
         #[cfg(debug_assertions)]
         if crate::qa::directory().is_some() {
-            secrets = Arc::new(crate::qa::Secrets::default());
+            secrets = Arc::new(crate::security::MemorySecretStore::default());
         }
         #[cfg(not(debug_assertions))]
         let _ = &mut secrets;
         let settings = Arc::new(SettingsStore::load(config_dir.join("settings.json"))?);
+        // Keys used to be stored one per kind. Bind any such key to the address it has been
+        // used with. A credential store that cannot be read right now must not stop the
+        // application from starting; the keys stay where they are and this runs again.
+        if let Err(error) = crate::security::adopt_legacy_keys(secrets.as_ref(), &settings.get()?) {
+            eprintln!("QuickTranslate: saved keys could not be checked: {error}");
+        }
         let popup_size = Arc::new(PopupSizeStore::load(config_dir.join("popup-window.json")));
         let cache_path = data_dir.join("translations.sqlite3");
         let ocr_plugin_dir = crate::ocr::plugin::plugin_dir(&data_dir);
@@ -101,7 +106,6 @@ impl AppState {
             vocabulary,
             vocabulary_generation: tokio::sync::Semaphore::new(2),
             latest_request: AtomicU64::new(0),
-            popup_pinned: AtomicBool::new(false),
             vocabulary_collection_open: AtomicBool::new(false),
             active_request: Mutex::new(CancellationToken::new()),
             last_error: RwLock::new(None),
@@ -116,6 +120,20 @@ impl AppState {
             *active = next.clone();
         }
         (request_id, next)
+    }
+
+    /// The cancellation token of the request now on screen.
+    pub(crate) fn active_token(&self) -> CancellationToken {
+        self.active_request
+            .lock()
+            .map(|active| active.clone())
+            .unwrap_or_default()
+    }
+
+    /// Abandons the request on screen: its work is cancelled and anything it still produces
+    /// is ignored. Returns the id that now counts as current.
+    pub(crate) fn cancel_active(&self) -> u64 {
+        self.begin_request().0
     }
 
     pub(crate) fn is_latest(&self, request_id: u64) -> bool {
@@ -136,11 +154,11 @@ impl AppState {
     }
 
     pub fn popup_pinned(&self) -> bool {
-        self.popup_pinned.load(Ordering::Relaxed)
+        self.popup_size.pinned()
     }
 
     pub fn set_popup_pinned(&self, pinned: bool) {
-        self.popup_pinned.store(pinned, Ordering::Relaxed);
+        let _ = self.popup_size.set_pinned(pinned);
     }
 }
 
@@ -182,13 +200,23 @@ pub fn trigger_selected_translation(app: AppHandle) -> u64 {
 }
 
 pub fn trigger_ocr_translation(app: AppHandle, recognized_text: String) -> u64 {
+    trigger_translation(app, recognized_text, "ocr")
+}
+
+/// Translates text the user typed or pasted into the popup. It takes the same path as a
+/// selection: one request on screen at a time, cached, streamed.
+pub fn trigger_text_translation(app: AppHandle, text: String) -> u64 {
+    trigger_translation(app, text, "selection")
+}
+
+fn trigger_translation(app: AppHandle, text: String, source_kind: &'static str) -> u64 {
     let (request_id, cancellation) = app.state::<AppState>().begin_request();
     tauri::async_runtime::spawn(translate_request(
         app,
         request_id,
         cancellation,
-        recognized_text,
-        "ocr",
+        text,
+        source_kind,
     ));
     request_id
 }
@@ -291,7 +319,14 @@ async fn translate_request(
         }
     };
     let Some(outcome) = cancellation
-        .run_until_cancelled(state.translation.translate(source_text, settings, api_key))
+        .run_until_cancelled(state.translation.translate_streaming(
+            source_text,
+            settings,
+            api_key,
+            true,
+            None,
+            delta_emitter(&app, request_id, None),
+        ))
         .await
     else {
         return;
@@ -315,6 +350,50 @@ async fn translate_request(
             );
         }
         Err(error) => show_error(&app, request_id, error, false),
+    }
+}
+
+/// The translation written so far, sent to the popup while the rest is still arriving.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeltaPayload<'a> {
+    request_id: u64,
+    /// Set for a retranslation the popup started itself, to tell its attempts apart.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generation: Option<u64>,
+    text: &'a str,
+}
+
+/// How often the popup is updated while a translation streams in. Pieces arrive far more
+/// often than a reader can follow or a window needs to repaint.
+const DELTA_INTERVAL: Duration = Duration::from_millis(50);
+
+/// A callback for [`TranslationService::translate_streaming`] that forwards the partial
+/// translation to the popup, as long as `request_id` is still the request on screen.
+pub(crate) fn delta_emitter(
+    app: &AppHandle,
+    request_id: u64,
+    generation: Option<u64>,
+) -> impl FnMut(&str) + Send {
+    let app = app.clone();
+    let mut last_sent: Option<std::time::Instant> = None;
+    move |text: &str| {
+        if last_sent.is_some_and(|sent| sent.elapsed() < DELTA_INTERVAL) {
+            return;
+        }
+        if !app.state::<AppState>().is_latest(request_id) {
+            return;
+        }
+        last_sent = Some(std::time::Instant::now());
+        let _ = app.emit_to(
+            "popup",
+            "translation-delta",
+            DeltaPayload {
+                request_id,
+                generation,
+                text,
+            },
+        );
     }
 }
 

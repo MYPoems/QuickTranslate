@@ -2,7 +2,9 @@ use super::{
     AppSettings, AppearancePreferences, OcrEngineKind, OcrLanguage, SettingsStore, UpdateSettings,
     CURRENT_SETTINGS_SCHEMA,
 };
-use crate::{errors::AppError, speech::SpeechPreferences};
+use crate::{
+    errors::AppError, speech::SpeechPreferences, translation::preferences::TranslationPreferences,
+};
 use serde::{Deserialize, Serialize};
 
 // Pure configuration parsing lives outside Tauri commands so migrations are testable.
@@ -11,6 +13,7 @@ use serde::{Deserialize, Serialize};
 pub struct SettingsBackup {
     pub appearance: AppearancePreferences,
     pub speech: SpeechPreferences,
+    pub translation: TranslationPreferences,
     pub schema_version: u32,
     pub provider: String,
     pub base_url: String,
@@ -30,6 +33,7 @@ impl Default for SettingsBackup {
         Self {
             appearance: settings.appearance,
             speech: settings.speech,
+            translation: settings.translation,
             schema_version: settings.schema_version,
             provider: settings.provider,
             base_url: settings.base_url,
@@ -47,15 +51,17 @@ impl Default for SettingsBackup {
 
 pub fn parse_settings_backup(contents: &str) -> Result<SettingsBackup, AppError> {
     let backup: SettingsBackup = serde_json::from_str(contents)
-        .map_err(|error| AppError::Settings(format!("备份 JSON 无效：{error}")))?;
+        .map_err(|error| AppError::invalid("settingsBackup", format!("备份 JSON 无效：{error}")))?;
     if backup.schema_version > CURRENT_SETTINGS_SCHEMA {
-        return Err(AppError::Settings(
-            "该备份来自更高版本，当前版本无法导入".into(),
+        return Err(AppError::invalid(
+            "settingsBackup",
+            "该备份来自更高版本，当前版本无法导入",
         ));
     }
     let normalized = SettingsStore::validate(&UpdateSettings {
         appearance: backup.appearance,
         speech: backup.speech,
+        translation: backup.translation,
         provider: backup.provider,
         base_url: backup.base_url,
         model: backup.model,
@@ -76,6 +82,7 @@ pub fn parse_settings_backup(contents: &str) -> Result<SettingsBackup, AppError>
     Ok(SettingsBackup {
         appearance: normalized.appearance,
         speech: normalized.speech,
+        translation: normalized.translation,
         schema_version: CURRENT_SETTINGS_SCHEMA,
         provider: normalized.provider,
         base_url: normalized.base_url,

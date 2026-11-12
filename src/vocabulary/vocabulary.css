@@ -25,3 +25,6 @@ body.vocabulary-window { padding:10px; background:var(--bg); }
 #app[data-quiz=true] .book-workspace { grid-template-columns:1fr; }#app[data-quiz=true] .book-workspace aside,#app[data-quiz=true] .book-maintenance,#app[data-quiz=true] #book-add { display:none; }
 #app[data-busy=true] .book-word,#app[data-busy=true] .book-learning-actions button,#app[data-busy=true] .book-tabs button { pointer-events:none; opacity:.6; }
 @media(max-width:700px) { .book-workspace { grid-template-columns:190px minmax(0,1fr); }.book-workspace aside { padding:12px 8px; }#book-detail { padding:16px; }.book-more { margin-left:0; } }
+.book-today { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); }
+.book-today progress { flex:1; height:6px; accent-color:var(--accent-strong); }
+.book-keys { color:var(--muted); font-size:12px; margin:8px 0 0; flex-basis:100%; }

@@ -1,4 +1,13 @@
-export type Language = "chinese" | "english";
+export type Language = "chinese" | "english" | "japanese" | "korean" | "french" | "german" | "spanish" | "russian";
+/** Between which languages to translate, and with which terms and extra requirements. */
+export interface TranslationPreferences {
+  /** The language the user reads; anything else is translated into it. */
+  primaryLanguage: Language;
+  /** What text in the primary language is translated into. */
+  secondaryLanguage: Language;
+  glossary: Array<{ source: string; target: string }>;
+  instructions: string;
+}
 export type OcrEngineKind = "windows" | "paddle" | "cloud";
 export type OcrLanguage = "auto" | "chinese" | "english";
 export interface AppearancePreferences {
@@ -25,7 +34,7 @@ export interface VocabularyEntry {
   model:string;provider:string;generatedAt:number|null;userEdited:boolean;activeQuiz:string|null;quizAttempts:number;
 }
 export interface VocabularyRules { intervalHours:number;dailyLimit:number }
-export interface VocabularyView { entries:VocabularyEntry[];total:number;due:number;tests:number;mastered:number;now:number;rules:VocabularyRules }
+export interface VocabularyView { entries:VocabularyEntry[];total:number;due:number;tests:number;mastered:number;reviewedToday?:number;now:number;rules:VocabularyRules }
 export interface VocabularyQuizView { token:string;entryId:number;meaningPrompt:string;options:string[];cloze:string;hint:string }
 export interface VocabularyQuizResult { passed:boolean;meaningCorrect:boolean;spellingCorrect:boolean;entry:VocabularyEntry }
 
@@ -46,6 +55,8 @@ export interface TranslationResult {
 export interface AppError {
   code: string;
   message: string;
+  /** Name of the settings form control the backend rejected, when there is one. */
+  field?: string;
 }
 
 export interface TranslationEvent {
@@ -60,6 +71,7 @@ export interface TranslationEvent {
 export interface SettingsView {
   appearance: AppearancePreferences;
   speech: SpeechPreferences;
+  translation?: TranslationPreferences;
   provider: string;
   baseUrl: string;
   model: string;
@@ -79,6 +91,7 @@ export interface SettingsView {
 export interface UpdateSettings {
   appearance: AppearancePreferences;
   speech: SpeechPreferences;
+  translation: TranslationPreferences;
   provider: string;
   baseUrl: string;
   model: string;
@@ -109,9 +122,23 @@ export interface DiagnosticsView {
   cloudOcrApiKeyConfigured: boolean;
   paddleOcrInstalled: boolean;
   cacheEntries: number;
+  historyEntries?: number;
   settingsPath: string;
   cachePath: string;
   lastError?: AppError;
+  lastCapture?: CaptureDiagnostics;
+}
+
+/** What the last selection capture did: timings and yes/no answers, never any content. */
+export interface CaptureDiagnostics {
+  secondsAgo: number;
+  totalMs: number;
+  releaseWaitMs: number;
+  keysReleased: boolean;
+  clipboardChanged: boolean;
+  textFound: boolean;
+  writtenByTarget: boolean;
+  clipboardRestored?: boolean | null;
 }
 
 export interface HistoryEntry {
@@ -123,12 +150,15 @@ export interface HistoryEntry {
   provider: string;
   model: string;
   createdAt: number;
+  /** When the text was last translated or looked up again. */
+  usedAt?: number;
   favorite: boolean;
 }
 
 export interface SettingsBackup {
   appearance: AppearancePreferences;
   speech: SpeechPreferences;
+  translation?: TranslationPreferences;
   schemaVersion: number;
   provider: string;
   baseUrl: string;

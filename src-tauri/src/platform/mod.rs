@@ -17,6 +17,64 @@ pub struct ScreenBounds {
     pub height: u32,
 }
 
+/// A summary of the last selection capture: timings and yes/no answers, never content.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CaptureDiagnostics {
+    pub seconds_ago: u64,
+    pub total_ms: u32,
+    pub release_wait_ms: u32,
+    pub keys_released: bool,
+    pub clipboard_changed: bool,
+    pub text_found: bool,
+    pub written_by_target: bool,
+    pub clipboard_restored: Option<bool>,
+}
+
+pub fn last_capture_diagnostics() -> Option<CaptureDiagnostics> {
+    #[cfg(windows)]
+    {
+        windows::selection::last_capture_report().map(|report| CaptureDiagnostics {
+            seconds_ago: report.finished.elapsed().as_secs(),
+            total_ms: report.total_ms,
+            release_wait_ms: report.release_wait_ms,
+            keys_released: report.keys_released,
+            clipboard_changed: report.clipboard_changed,
+            text_found: report.text_found,
+            written_by_target: report.written_by_target,
+            clipboard_restored: report.clipboard_restored,
+        })
+    }
+    #[cfg(not(windows))]
+    None
+}
+
+/// How far local time is ahead of UTC, in seconds, including daylight saving. Used where
+/// "today" has to mean the user's day rather than the UTC one.
+pub fn local_utc_offset_seconds() -> i64 {
+    #[cfg(windows)]
+    {
+        use ::windows::Win32::System::Time::{GetTimeZoneInformation, TIME_ZONE_INFORMATION};
+        const DAYLIGHT: u32 = 2;
+        const INVALID: u32 = u32::MAX;
+        let mut zone = TIME_ZONE_INFORMATION::default();
+        let state = unsafe { GetTimeZoneInformation(&mut zone) };
+        if state == INVALID {
+            return 0;
+        }
+        // Windows gives the bias as minutes to add to local time to get UTC.
+        let bias = zone.Bias
+            + if state == DAYLIGHT {
+                zone.DaylightBias
+            } else {
+                zone.StandardBias
+            };
+        -i64::from(bias) * 60
+    }
+    #[cfg(not(windows))]
+    0
+}
+
 pub async fn get_selected_text() -> Result<String, AppError> {
     #[cfg(windows)]
     {

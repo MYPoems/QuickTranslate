@@ -49,26 +49,46 @@ impl SpeechPreferences {
             || self.cloud_model.len() > 128
             || !self.cloud_model.ends_with("realtime") && !self.cloud_model.contains("realtime-")
         {
-            return Err(AppError::Settings("请选择 Qwen3-TTS Realtime 模型".into()));
+            return Err(AppError::invalid(
+                "cloudSpeechModel",
+                "云端语音模型需为 Qwen3-TTS Realtime 系列，例如 qwen3-tts-flash-realtime",
+            ));
         }
-        for voice in [&self.cloud_chinese_voice, &self.cloud_english_voice] {
+        for (field, voice) in [
+            ("cloudChineseVoice", &self.cloud_chinese_voice),
+            ("cloudEnglishVoice", &self.cloud_english_voice),
+        ] {
             if voice.is_empty()
                 || voice.len() > 128
                 || !voice
                     .chars()
                     .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
             {
-                return Err(AppError::Settings("云端音色名称无效".into()));
+                return Err(AppError::invalid(
+                    field,
+                    "云端音色名称只能包含字母、数字、下划线和连字符",
+                ));
             }
         }
         if !(1..=8).contains(&self.threads) {
-            return Err(AppError::Settings("离线语音线程数必须在 1–8 之间".into()));
+            return Err(AppError::invalid(
+                "speechThreads",
+                "离线语音线程数必须在 1–8 之间",
+            ));
         }
         if !(50..=200).contains(&self.rate) {
-            return Err(AppError::Settings("朗读语速必须在 50%–200% 之间".into()));
+            return Err(AppError::invalid(
+                "speechRate",
+                "朗读语速必须在 50%–200% 之间",
+            ));
         }
-        if self.chinese_voice.len() > 1024 || self.english_voice.len() > 1024 {
-            return Err(AppError::Settings("音色标识过长".into()));
+        for (field, voice) in [
+            ("chineseVoice", &self.chinese_voice),
+            ("englishVoice", &self.english_voice),
+        ] {
+            if voice.len() > 1024 {
+                return Err(AppError::invalid(field, "音色标识过长"));
+            }
         }
         Ok(())
     }

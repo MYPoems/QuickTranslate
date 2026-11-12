@@ -1,0 +1,27 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "popup-commands",
+  "description": "What the translation popup may ask of the backend: translate again, copy, read aloud, pin, collect words",
+  "windows": ["popup"],
+  "permissions": [
+    "allow-get-appearance-preferences",
+    "allow-get-shortcuts",
+    "allow-set-vocabulary-collection-open",
+    "allow-open-vocabulary",
+    "allow-collect-vocabulary",
+    "allow-generate-vocabulary",
+    "allow-get-speech-preferences",
+    "allow-stream-cloud-speech",
+    "allow-synthesize-speech",
+    "allow-stop-speech",
+    "allow-retranslate-text",
+    "allow-translate-input",
+    "allow-open-settings",
+    "allow-cancel-request",
+    "allow-start-ocr-selection",
+    "allow-copy-translation",
+    "allow-get-popup-pinned",
+    "allow-set-popup-pinned",
+    "allow-hide-translation-window"
+  ]
+}

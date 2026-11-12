@@ -1,7 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { defaultSpeech } from "../speech/reader";
-import { organizeSettings, loadAppearance, appearanceFromForm, selectSettingsPanel } from "./layout";
+import { organizeSettings, loadAppearance, appearanceFromForm, selectSettingsPanel, loadLearningRules, learningRulesFromForm, invalidLearningField } from "./layout";
+import { attachShortcutRecorder } from "./shortcut";
+import { formatCapture } from "./diagnostics";
+import { mountOnboarding } from "./onboarding";
+import { formatGlossary, languageNames, languages, parseGlossary } from "../languages";
 import type {
   AppError,
   DiagnosticsView,
@@ -13,6 +17,8 @@ import type {
   SpeechVoice,
   UpdateProgress,
   SpeechPluginStatus,
+  Language,
+  VocabularyRules,
 } from "../types";
 import "./settings.css";
 
@@ -23,6 +29,10 @@ let cloudSpeechApiKeyConfigured = false;
 let paddleOcrInstalled = false;
 let updateState: UpdateProgress = { phase: "idle", version: "", downloaded: 0, message: "", releaseNotes: "" };
 let formBusy = false;
+let savedRules: VocabularyRules | undefined;
+let keyStatusTimer = 0;
+// Each category's field values as last loaded or saved; a difference means unsaved changes.
+let cleanState = new Map<string, string>();
 let speechPluginState: SpeechPluginStatus = { installed: false, present: false, phase: "idle", downloaded: 0, downloadBytes: 171837079, version: "", message: "" };
 const cloudOcrApiKeyUrl = "https://bailian.console.aliyun.com/?tab=model#/api-key";
 const providerPresets: Record<string, { baseUrl: string; model: string }> = {
@@ -45,7 +55,7 @@ export function mountSettings(): void {
         <p class="subtitle">配置 OpenAI-compatible 翻译服务。API Key 仅保存到 Windows 凭据管理器。</p>
       </header>
       <form id="settings-form">
-        <label>Provider
+        <label>服务商
           <select name="provider">
             <option>OpenAI Compatible</option>
             <option>阿里云百炼</option>
@@ -55,11 +65,23 @@ export function mountSettings(): void {
             <option>自定义</option>
           </select>
         </label>
-        <label>Base URL<input name="baseUrl" type="url" required placeholder="https://api.openai.com/v1" /></label>
-        <label>Model<input name="model" required placeholder="gpt-4.1-mini" /></label>
-        <label>API Key<input name="apiKey" type="password" autocomplete="off" placeholder="保持为空则不修改；本地模型可留空" /></label>
-        <label>全局快捷键<input name="globalShortcut" required placeholder="Alt+Q" /></label>
-        <label>OCR 截图翻译快捷键<input name="ocrShortcut" required placeholder="Alt+W" /></label>
+        <label>服务地址<input name="baseUrl" type="url" required placeholder="https://api.openai.com/v1" /></label>
+        <label>模型<input name="model" required placeholder="gpt-4.1-mini" /></label>
+        <label>API Key<input name="apiKey" type="password" autocomplete="off" placeholder="留空则不修改；本地模型可留空" /></label>
+        <section class="ocr-card translation-card">
+          <strong>语言与用词</strong>
+          <div class="language-pair">
+            <label>我阅读的语言<select name="primaryLanguage"></select></label>
+            <label>它译成<select name="secondaryLanguage"></select></label>
+          </div>
+          <p>其他语言的文字都会译成你阅读的语言；这种语言的文字译成右边选的语言。在悬浮窗的“更多”里可以为单次翻译另选目标语言。</p>
+          <label>术语表<textarea name="glossary" rows="4" spellcheck="false" placeholder="每行一条：原文 = 译文&#10;pipeline = 流水线"></textarea></label>
+          <p>只有出现在原文里的术语才会随请求发送，最多 200 条。</p>
+          <label>附加翻译要求<textarea name="translationInstructions" rows="2" maxlength="600" placeholder="例如：使用正式书面语；人名保留原文"></textarea></label>
+          <p>会附加在固定的翻译指令之后，不改变输出格式。修改术语表或附加要求后，已缓存的译文不会再被使用。</p>
+        </section>
+        <div class="shortcut-field"><label>划词翻译快捷键<input name="globalShortcut" required readonly placeholder="Alt+Q" aria-describedby="globalShortcut-hint" /></label><p id="globalShortcut-hint" class="field-hint" role="status"></p></div>
+        <div class="shortcut-field"><label>截图翻译快捷键<input name="ocrShortcut" required readonly placeholder="Alt+W" aria-describedby="ocrShortcut-hint" /></label><p id="ocrShortcut-hint" class="field-hint" role="status"></p></div>
         <section class="ocr-card">
           <div>
             <strong>OCR 识别引擎</strong>
@@ -94,15 +116,16 @@ export function mountSettings(): void {
           </div>
           <div id="cloud-ocr-options" class="ocr-options" hidden>
             <p class="privacy-warning">云端模式会把所选截图发送给你配置的服务商，仅在已配置 Key 且你主动框选截图时发送。不希望上传时请改用离线方案。</p>
-            <label>Cloud OCR Base URL<input name="cloudOcrBaseUrl" type="url" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" /></label>
-            <label>Cloud OCR Model<input name="cloudOcrModel" placeholder="qwen3.5-ocr" /></label>
-            <label>Cloud OCR API Key<input name="cloudOcrApiKey" type="password" autocomplete="off" placeholder="保持为空则不修改" /></label>
+            <label>云端 OCR 服务地址<input name="cloudOcrBaseUrl" type="url" placeholder="https://dashscope.aliyuncs.com/compatible-mode/v1" /></label>
+            <label>云端 OCR 模型<input name="cloudOcrModel" placeholder="qwen3.5-ocr" /></label>
+            <label>云端 OCR API Key<input name="cloudOcrApiKey" type="password" autocomplete="off" placeholder="留空则不修改" /></label>
             <p id="cloud-key-status" class="key-status"></p>
-            <label class="checkbox-row"><input name="clearCloudOcrApiKey" type="checkbox" />删除已保存的云端 OCR API Key</label>
+            <label class="checkbox-row"><input name="clearCloudOcrApiKey" type="checkbox" />删除这个服务地址已保存的云端 OCR API Key</label>
             <div class="cloud-help">
-              <span>推荐：阿里云百炼 qwen3.5-ocr</span>
-              <button id="copy-cloud-key-url" type="button" class="secondary">复制 API 申请网址</button>
+              <button id="test-cloud-ocr" type="button" class="secondary">测试云端 OCR 连接</button>
+              <button id="open-cloud-key-page" type="button" class="secondary">打开 API Key 申请页面</button>
             </div>
+            <p>推荐阿里云百炼 qwen3.5-ocr。测试只发送一张内置的小图片，不会上传你的屏幕内容，可能产生少量费用。</p>
           </div>
         </section>
         <section class="ocr-card speech-card">
@@ -117,8 +140,8 @@ export function mountSettings(): void {
             <p>默认 Cherry，同一音色支持中英文。可填写官方支持的音色 ID。</p>
             <label>云端朗读 API Key<input name="cloudSpeechApiKey" type="password" autocomplete="off" placeholder="独立保存；留空不修改，不自动复用 OCR / 翻译 Key" /></label>
             <p id="speech-key-status" class="key-status"></p>
-            <label class="checkbox-row"><input name="clearCloudSpeechApiKey" type="checkbox" />删除已保存的云端朗读 API Key</label>
-            <div class="cloud-help"><button id="test-cloud-speech" type="button" class="secondary">测试云端朗读连接</button><button id="copy-speech-key-url" type="button" class="secondary">复制 API 申请网址</button></div>
+            <label class="checkbox-row"><input name="clearCloudSpeechApiKey" type="checkbox" />删除这个地域已保存的云端朗读 API Key</label>
+            <div class="cloud-help"><button id="test-cloud-speech" type="button" class="secondary">测试云端朗读连接</button><button id="open-speech-key-page" type="button" class="secondary">打开 API Key 申请页面</button></div>
             <p>测试会合成一条短句并显示首音频耗时，可能产生少量费用；不会保存未保存的表单。</p>
           </div>
           <div id="offline-speech-options" class="ocr-options" hidden>
@@ -139,7 +162,7 @@ export function mountSettings(): void {
         <div class="maintenance-card">
           <div>
             <strong>本地翻译缓存</strong>
-            <p>最多保留 1000 条常用译文，可随时清理。</p>
+            <p>最多保留 1000 条译文，用来加快重复翻译。清理缓存不会删除翻译历史和收藏。</p>
           </div>
           <button id="clear-cache" type="button" class="secondary">清理缓存</button>
         </div>
@@ -175,27 +198,41 @@ export function mountSettings(): void {
             <button id="import-settings" type="button" class="secondary">载入到表单</button>
           </div>
         </details>
-        <label class="checkbox-row"><input name="clearApiKey" type="checkbox" />删除已保存的 API Key</label>
+        <label class="checkbox-row"><input name="clearApiKey" type="checkbox" />删除这个服务地址已保存的 API Key</label>
         <p id="key-status" class="key-status"></p>
         <p id="status" class="status" role="status"></p>
+        <div id="translation-actions" class="cloud-help"><button id="test" type="button" class="secondary">测试连接</button></div>
         <div class="form-actions">
-          <button id="test" type="button" class="secondary">测试连接</button>
+          <button id="discard" type="button" class="secondary" hidden>放弃更改</button>
           <button id="save" type="submit" class="primary">保存</button>
         </div>
       </form>
     </section>`;
 
   const form = root.querySelector<HTMLFormElement>("#settings-form")!;
+  for (const name of ["primaryLanguage", "secondaryLanguage"]) {
+    const select = form.elements.namedItem(name) as HTMLSelectElement;
+    for (const language of languages) select.add(new Option(languageNames[language], language));
+  }
   organizeSettings(root, form);
   (form.elements.namedItem("speechProvider") as HTMLSelectElement).addEventListener("change", () => refreshSpeechPanels(form));
-  root.querySelector("#copy-speech-key-url")!.addEventListener("click", () => void copyCloudKeyUrl());
+  root.querySelector("#open-speech-key-page")!.addEventListener("click", () => void openKeyPage());
+  root.querySelector("#test-cloud-ocr")!.addEventListener("click", () => void testCloudOcr(form));
+  for (const [name, other] of [["globalShortcut", "ocrShortcut"], ["ocrShortcut", "globalShortcut"]]) {
+    attachShortcutRecorder(form.elements.namedItem(name) as HTMLInputElement, form.elements.namedItem(other) as HTMLInputElement, root.querySelector<HTMLElement>(`#${name}-hint`)!);
+  }
+  form.addEventListener("input", () => refreshDirty(form));
+  form.addEventListener("change", () => refreshDirty(form));
+  root.querySelector("#discard")!.addEventListener("click", () => void discard(form));
+  (form.elements.namedItem("cloudOcrBaseUrl") as HTMLInputElement).addEventListener("input", () => scheduleKeyStatus(form));
+  (form.elements.namedItem("cloudSpeechEndpoint") as HTMLSelectElement).addEventListener("change", () => scheduleKeyStatus(form));
   root.querySelector("#test-cloud-speech")!.addEventListener("click", () => void testCloudSpeech(form));
   root.querySelector("#toggle-speech-plugin")!.addEventListener("click", () => void toggleSpeechPlugin(form));
   root.querySelector("#cancel-speech-plugin")!.addEventListener("click", () => void invoke("cancel_speech_plugin_install").catch(error => setStatus(errorMessage(error), "error")));
   void listen<SpeechPluginStatus>("speech-plugin-progress", ({ payload }) => renderSpeechPlugin(payload)).then(() => invoke<SpeechPluginStatus>("get_speech_plugin_status")).then(renderSpeechPlugin).catch(error => { root.querySelector("#speech-plugin-status")!.textContent = errorMessage(error); });
   form.addEventListener("submit", (event) => {
     event.preventDefault();
-    const invalid = Array.from(form.querySelectorAll<HTMLInputElement>("input, select, textarea")).find(input => !input.closest('#settings-learning') && !input.validity.valid);
+    const invalid = invalidLearningField(form) ?? Array.from(form.querySelectorAll<HTMLInputElement>("input, select, textarea")).find(input => !input.disabled && !input.validity.valid);
     if (invalid) { selectSettingsPanel(form, invalid.closest<HTMLElement>("[data-settings-panel]")?.dataset.settingsPanel || "translation"); form.reportValidity(); return; }
     void save(form);
   });
@@ -203,9 +240,10 @@ export function mountSettings(): void {
   (form.elements.namedItem("provider") as HTMLSelectElement).addEventListener("change", () =>
     applyProviderPreset(form),
   );
-  (form.elements.namedItem("baseUrl") as HTMLInputElement).addEventListener("input", () =>
-    refreshKeyStatus(form),
-  );
+  (form.elements.namedItem("baseUrl") as HTMLInputElement).addEventListener("input", () => {
+    refreshKeyStatus(form);
+    scheduleKeyStatus(form);
+  });
   (form.elements.namedItem("ocrEngine") as HTMLSelectElement).addEventListener("change", () =>
     refreshOcrPanels(form),
   );
@@ -213,8 +251,8 @@ export function mountSettings(): void {
     .querySelector<HTMLButtonElement>("#toggle-paddle-plugin")!
     .addEventListener("click", () => void togglePaddlePlugin());
   root
-    .querySelector<HTMLButtonElement>("#copy-cloud-key-url")!
-    .addEventListener("click", () => void copyCloudKeyUrl());
+    .querySelector<HTMLButtonElement>("#open-cloud-key-page")!
+    .addEventListener("click", () => void openKeyPage());
   root
     .querySelector<HTMLButtonElement>("#clear-cache")!
     .addEventListener("click", () => void clearCache());
@@ -244,7 +282,19 @@ export function mountSettings(): void {
   root
     .querySelector<HTMLButtonElement>("#import-settings")!
     .addEventListener("click", () => void importSettings(form));
-  void load(form);
+  void load(form).then(async () => {
+    savedRules = await loadLearningRules(form);
+    cleanState.set("learning", panelStates(form).get("learning") ?? "");
+    refreshDirty(form);
+    await mountOnboarding(root, {
+      providers: Object.keys(providerPresets),
+      isLocal: provider => isLocalBaseUrl(providerPresets[provider]?.baseUrl || ""),
+      chooseProvider: provider => { setInput(form, "provider", provider); applyProviderPreset(form); refreshDirty(form); },
+      enterKey: key => { setInput(form, "apiKey", key); refreshDirty(form); },
+      formValue: () => formValue(form),
+      save: () => save(form),
+    });
+  });
 }
 
 async function load(form: HTMLFormElement): Promise<void> {
@@ -261,6 +311,7 @@ async function load(form: HTMLFormElement): Promise<void> {
     setInput(form, "ocrLanguage", settings.ocrLanguage);
     setInput(form, "cloudOcrBaseUrl", settings.cloudOcrBaseUrl);
     setInput(form, "cloudOcrModel", settings.cloudOcrModel);
+    loadTranslation(form, settings.translation);
     setCheckbox(form, "autoStartEnabled", settings.autoStartEnabled);
     await loadVoices(form, settings.speech);
     apiKeyConfigured = settings.apiKeyConfigured;
@@ -277,17 +328,88 @@ async function load(form: HTMLFormElement): Promise<void> {
       downloadBytes: 31_211_520,
     });
     refreshOcrPanels(form);
+    clearKeyInputs(form);
+    markClean(form);
     setStatus("", "neutral");
   } catch (error) {
     setStatus(errorMessage(error), "error");
   }
 }
 
-async function save(form: HTMLFormElement): Promise<void> {
+function clearKeyInputs(form: HTMLFormElement): void {
+  for (const name of ["apiKey", "cloudOcrApiKey", "cloudSpeechApiKey"]) setInput(form, name, "");
+  for (const name of ["clearApiKey", "clearCloudOcrApiKey", "clearCloudSpeechApiKey"]) setCheckbox(form, name, false);
+}
+
+// One string per category describing every field in it, so that categories with unsaved
+// changes can be told apart.
+function panelStates(form: HTMLFormElement): Map<string, string> {
+  const states = new Map<string, string>();
+  form.querySelectorAll<HTMLElement>("[data-settings-panel]").forEach(panel => {
+    const fields = Array.from(panel.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input[name], select[name], textarea[name]"));
+    states.set(panel.dataset.settingsPanel!, fields.map(field => `${field.name}=${field instanceof HTMLInputElement && field.type === "checkbox" ? field.checked : field.value}`).join("\n"));
+  });
+  return states;
+}
+
+function markClean(form: HTMLFormElement): void {
+  cleanState = panelStates(form);
+  refreshDirty(form);
+}
+
+function refreshDirty(form: HTMLFormElement): void {
+  const current = panelStates(form);
+  let dirty = false;
+  form.querySelectorAll<HTMLElement>("[data-settings-tab]").forEach(tab => {
+    const changed = current.get(tab.dataset.settingsTab!) !== cleanState.get(tab.dataset.settingsTab!);
+    tab.dataset.dirty = String(changed);
+    tab.setAttribute("aria-label", changed ? `${tab.textContent}（有未保存的更改）` : tab.textContent || "");
+    dirty ||= changed;
+  });
+  root.querySelector<HTMLButtonElement>("#save")!.disabled = !dirty || formBusy;
+  root.querySelector<HTMLButtonElement>("#discard")!.hidden = !dirty;
+  form.dataset.dirty = String(dirty);
+}
+
+async function discard(form: HTMLFormElement): Promise<void> {
+  form.querySelectorAll("[aria-invalid]").forEach(field => field.removeAttribute("aria-invalid"));
+  await load(form);
+  savedRules = await loadLearningRules(form);
+  markClean(form);
+  setStatus("已恢复为上次保存的设置", "neutral");
+}
+
+// The key shown as "saved" is the one for the address in the form, which changes as the
+// user edits it or picks another provider.
+function scheduleKeyStatus(form: HTMLFormElement): void {
+  window.clearTimeout(keyStatusTimer);
+  keyStatusTimer = window.setTimeout(() => void loadKeyStatus(form), 250);
+}
+
+async function loadKeyStatus(form: HTMLFormElement): Promise<void> {
+  const value = formValue(form);
+  try {
+    const status = await invoke<{ apiKeyConfigured: boolean; cloudOcrApiKeyConfigured: boolean; cloudSpeechApiKeyConfigured: boolean } | undefined>("get_key_status", { baseUrl: value.baseUrl, cloudOcrBaseUrl: value.cloudOcrBaseUrl, cloudSpeechEndpoint: value.speech.cloudEndpoint });
+    if (!status) return;
+    apiKeyConfigured = status.apiKeyConfigured;
+    cloudOcrApiKeyConfigured = status.cloudOcrApiKeyConfigured;
+    cloudSpeechApiKeyConfigured = status.cloudSpeechApiKeyConfigured;
+    refreshKeyStatus(form);
+    updateCloudKeyStatus();
+    refreshSpeechPanels(form);
+  } catch { /* The status line keeps what it showed; saving reports real problems. */ }
+}
+
+/** Saves the form; resolves to whether everything was saved. */
+async function save(form: HTMLFormElement): Promise<boolean> {
+  const rules = learningRulesFromForm(form);
+  const rulesChanged = !!rules && (rules.intervalHours !== savedRules?.intervalHours || rules.dailyLimit !== savedRules?.dailyLimit);
   setBusy(true);
   setStatus("正在保存…", "neutral");
   try {
     const settings = await invoke<SettingsView>("save_settings", { update: formValue(form) });
+    // The review rules are stored with the vocabulary; one Save button covers both.
+    if (rulesChanged) { await invoke("set_vocabulary_rules", { rules }); savedRules = rules; }
     loadAppearance(form, settings.appearance);
     (form.elements.namedItem("apiKey") as HTMLInputElement).value = "";
     (form.elements.namedItem("clearApiKey") as HTMLInputElement).checked = false;
@@ -304,9 +426,12 @@ async function save(form: HTMLFormElement): Promise<void> {
     updateKeyStatus(settings.apiKeyConfigured, isLocalBaseUrl(settings.baseUrl));
     updateCloudKeyStatus();
     refreshOcrPanels(form);
+    markClean(form);
     setStatus("设置已保存，快捷键和开机启动立即生效", "success");
+    return true;
   } catch (error) {
-    setStatus(errorMessage(error), "error");
+    reportError(form, error);
+    return false;
   } finally {
     setBusy(false);
   }
@@ -319,7 +444,7 @@ async function test(form: HTMLFormElement): Promise<void> {
     await invoke<string>("test_provider", { update: formValue(form) });
     setStatus("连接成功", "success");
   } catch (error) {
-    setStatus(errorMessage(error), "error");
+    reportError(form, error);
   } finally {
     setBusy(false);
   }
@@ -416,15 +541,18 @@ async function importSettings(form: HTMLFormElement): Promise<void> {
     setInput(form, "ocrLanguage", backup.ocrLanguage);
     setInput(form, "cloudOcrBaseUrl", backup.cloudOcrBaseUrl);
     setInput(form, "cloudOcrModel", backup.cloudOcrModel);
+    loadTranslation(form, backup.translation);
     setCheckbox(form, "autoStartEnabled", backup.autoStartEnabled);
     loadAppearance(form, backup.appearance);
     await loadVoices(form, backup.speech || defaultSpeech);
     refreshSpeechPanels(form);
     refreshKeyStatus(form);
     refreshOcrPanels(form);
+    refreshDirty(form);
+    scheduleKeyStatus(form);
     setStatus("备份已载入表单，请确认后点击保存", "success");
   } catch (error) {
-    setStatus(errorMessage(error), "error");
+    reportError(form, error);
   } finally {
     setBusy(false);
   }
@@ -443,10 +571,12 @@ function formatDiagnostics(value: DiagnosticsView): string {
     `Cloud OCR API Key configured: ${value.cloudOcrApiKeyConfigured ? "yes" : "no"}`,
     `API Key configured: ${value.apiKeyConfigured ? "yes" : "no"}`,
     `Cache entries: ${value.cacheEntries}`,
+    `History entries: ${value.historyEntries ?? "?"}`,
     `Settings: ${value.settingsPath}`,
     `Cache: ${value.cachePath}`,
   ];
   if (value.lastError) lines.push(`Last error: ${value.lastError.code} - ${value.lastError.message}`);
+  lines.push("", ...formatCapture(value.lastCapture));
   return lines.join("\n");
 }
 
@@ -457,6 +587,12 @@ function formValue(form: HTMLFormElement): UpdateSettings {
   return {
     appearance: appearanceFromForm(form),
     speech: { provider: String(data.get("speechProvider") || "cloud") as "cloud" | "offline", cloudEndpoint: String(data.get("cloudSpeechEndpoint") || defaultSpeech.cloudEndpoint), cloudModel: String(data.get("cloudSpeechModel") || defaultSpeech.cloudModel).trim(), cloudChineseVoice: String(data.get("cloudChineseVoice") || "Cherry").trim(), cloudEnglishVoice: String(data.get("cloudEnglishVoice") || "Cherry").trim(), threads: Number(data.get("speechThreads") || 4), rate: Number(data.get("speechRate") || 100), chineseVoice: String(data.get("chineseVoice") || ""), englishVoice: String(data.get("englishVoice") || ""), bilingual: data.get("bilingual") === "on" },
+    translation: {
+      primaryLanguage: String(data.get("primaryLanguage") || "chinese") as Language,
+      secondaryLanguage: String(data.get("secondaryLanguage") || "english") as Language,
+      glossary: parseGlossary(String(data.get("glossary") || "")),
+      instructions: String(data.get("translationInstructions") || "").trim(),
+    },
     provider: String(data.get("provider") || "OpenAI Compatible"),
     baseUrl: String(data.get("baseUrl") || "").trim(),
     model: String(data.get("model") || "").trim(),
@@ -476,8 +612,15 @@ function formValue(form: HTMLFormElement): UpdateSettings {
   };
 }
 
+function loadTranslation(form: HTMLFormElement, value: SettingsView["translation"]): void {
+  setInput(form, "primaryLanguage", value?.primaryLanguage || "chinese");
+  setInput(form, "secondaryLanguage", value?.secondaryLanguage || "english");
+  setInput(form, "glossary", formatGlossary(value?.glossary));
+  setInput(form, "translationInstructions", value?.instructions || "");
+}
+
 function setInput(form: HTMLFormElement, name: string, value: string): void {
-  (form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement).value = value;
+  (form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).value = value;
 }
 
 function setCheckbox(form: HTMLFormElement, name: string, checked: boolean): void {
@@ -487,10 +630,10 @@ function setCheckbox(form: HTMLFormElement, name: string, checked: boolean): voi
 
 function updateKeyStatus(configured: boolean, localProvider: boolean): void {
   root.querySelector<HTMLElement>("#key-status")!.textContent = configured
-    ? "已安全保存 API Key"
+    ? "已保存这个服务地址的 API Key"
     : localProvider
-      ? "本地 Provider 无需 API Key"
-      : "尚未配置 API Key";
+      ? "本地模型无需 API Key"
+      : "这个服务地址尚未配置 API Key";
 }
 
 function applyProviderPreset(form: HTMLFormElement): void {
@@ -501,6 +644,7 @@ function applyProviderPreset(form: HTMLFormElement): void {
     setInput(form, "model", preset.model);
   }
   refreshKeyStatus(form);
+  scheduleKeyStatus(form);
 }
 
 function refreshKeyStatus(form: HTMLFormElement): void {
@@ -527,8 +671,8 @@ function refreshOcrPanels(form: HTMLFormElement): void {
 
 function updateCloudKeyStatus(): void {
   root.querySelector<HTMLElement>("#cloud-key-status")!.textContent = cloudOcrApiKeyConfigured
-    ? "已安全保存云端 OCR API Key"
-    : "尚未配置云端 OCR API Key";
+    ? "已保存这个服务地址的云端 OCR API Key"
+    : "这个服务地址尚未配置云端 OCR API Key";
 }
 
 async function togglePaddlePlugin(): Promise<void> {
@@ -562,12 +706,34 @@ function updatePaddlePluginStatus(status: PaddleOcrPluginStatus): void {
     : "一键安装";
 }
 
-async function copyCloudKeyUrl(): Promise<void> {
+// Opens the provider's key page in the browser. If that fails, the address is copied
+// instead so the user can still get there.
+async function openKeyPage(): Promise<void> {
   try {
-    await invoke("copy_translation", { text: cloudOcrApiKeyUrl });
-    setStatus("阿里云百炼 API Key 申请网址已复制", "success");
+    await invoke("open_api_key_page");
+    setStatus("已在浏览器中打开阿里云百炼的 API Key 页面", "success");
+  } catch {
+    try {
+      await invoke("copy_translation", { text: cloudOcrApiKeyUrl });
+      setStatus("无法打开浏览器，申请网址已复制到剪贴板", "neutral");
+    } catch (error) {
+      setStatus(errorMessage(error), "error");
+    }
+  }
+}
+
+async function testCloudOcr(form: HTMLFormElement): Promise<void> {
+  setBusy(true);
+  setStatus("正在测试云端 OCR（发送一张内置的小图片）…", "neutral");
+  try {
+    const result = await invoke<{ elapsedMs: number; recognized: boolean }>("test_cloud_ocr", { update: formValue(form) });
+    setStatus(result.recognized
+      ? `云端 OCR 连接成功，识别用时 ${result.elapsedMs} ms`
+      : `云端 OCR 已连通（${result.elapsedMs} ms），但没有读出测试图片里的文字，请确认模型支持图片识别`, result.recognized ? "success" : "neutral");
   } catch (error) {
-    setStatus(errorMessage(error), "error");
+    reportError(form, error);
+  } finally {
+    setBusy(false);
   }
 }
 
@@ -580,6 +746,8 @@ function setBusy(busy: boolean): void {
   root.querySelectorAll<HTMLButtonElement>("button").forEach((button) => (button.disabled = busy));
   renderUpdate(updateState);
   renderSpeechPlugin(speechPluginState);
+  const form = root.querySelector<HTMLFormElement>("#settings-form");
+  if (form) refreshDirty(form);
 }
 
 function renderSpeechPlugin(state: SpeechPluginStatus): void {
@@ -634,14 +802,14 @@ function refreshSpeechPanels(form: HTMLFormElement): void {
   const cloud = (form.elements.namedItem("speechProvider") as HTMLSelectElement).value === "cloud";
   root.querySelector<HTMLElement>("#cloud-speech-options")!.hidden = !cloud;
   root.querySelector<HTMLElement>("#offline-speech-options")!.hidden = cloud;
-  root.querySelector("#speech-key-status")!.textContent = cloudSpeechApiKeyConfigured ? "已安全保存云端朗读 API Key" : "尚未配置云端朗读 API Key；朗读前需配置，或选择离线方案";
+  root.querySelector("#speech-key-status")!.textContent = cloudSpeechApiKeyConfigured ? "已保存这个地域的云端朗读 API Key" : "这个地域尚未配置云端朗读 API Key；朗读前需配置，或选择离线方案";
 }
 async function testCloudSpeech(form: HTMLFormElement): Promise<void> {
   setBusy(true); setStatus("正在测试云端朗读（会合成一条短句）…", "neutral");
   try {
     const timing = await invoke<{ firstAudioMs: number; totalMs: number; cached: boolean }>("test_cloud_speech", { update: formValue(form) });
     setStatus(`云端朗读连接成功，首音频 ${timing.firstAudioMs} ms，合成总耗时 ${timing.totalMs} ms（不等于实际播放延迟）`, "success");
-  } catch (error) { setStatus(errorMessage(error), "error"); }
+  } catch (error) { reportError(form, error); }
   finally { setBusy(false); }
 }
 function renderUpdate(progress: UpdateProgress): void {
@@ -681,6 +849,27 @@ function setStatus(message: string, kind: "neutral" | "success" | "error"): void
   const status = root.querySelector<HTMLElement>("#status")!;
   status.textContent = message;
   status.dataset.kind = kind;
+}
+
+const fieldSelectors: Record<string, string> = { settingsBackup: "#settings-backup" };
+
+// Shows a failure and, when the backend names the form control it rejected, takes the user
+// to it: opens its category, reveals it, marks it invalid and focuses it.
+function reportError(form: HTMLFormElement, error: unknown): void {
+  setStatus(errorMessage(error), "error");
+  const field = (error as AppError | null)?.field;
+  if (!field) return;
+  const named = form.elements.namedItem(field);
+  const control = (named instanceof HTMLElement ? named : null) ?? root.querySelector<HTMLElement>(fieldSelectors[field] || "[data-no-such-field]");
+  if (!control) return;
+  const panel = control.closest<HTMLElement>("[data-settings-panel]")?.dataset.settingsPanel;
+  if (panel) selectSettingsPanel(form, panel);
+  const details = control.closest("details");
+  if (details) details.open = true;
+  control.setAttribute("aria-invalid", "true");
+  control.addEventListener("input", () => control.removeAttribute("aria-invalid"), { once: true });
+  control.addEventListener("change", () => control.removeAttribute("aria-invalid"), { once: true });
+  control.focus();
 }
 
 function errorMessage(error: unknown): string {

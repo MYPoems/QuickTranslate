@@ -11,6 +11,24 @@ use std::{
 
 pub const MIN_INTERVAL: i64 = 4 * 3600;
 const SCHEMA: i64 = 1;
+/// The start and end of the local day that contains `now`, as UTC timestamps. `offset` is
+/// how far local time is ahead of UTC, in seconds. The daily review limit counts within
+/// these bounds, so it resets at the user's midnight rather than at 00:00 UTC.
+fn local_day(now: i64, offset: i64) -> (i64, i64) {
+    let start = (now + offset).div_euclid(86_400) * 86_400 - offset;
+    (start, start + 86_400)
+}
+
+/// The local offset from UTC. Fixed at zero in tests so that they do not depend on the
+/// time zone of the machine running them.
+fn utc_offset() -> i64 {
+    if cfg!(test) {
+        0
+    } else {
+        crate::platform::local_utc_offset_seconds()
+    }
+}
+
 fn fail(message: impl Into<String>) -> AppError {
     AppError::Vocabulary(message.into())
 }
@@ -179,6 +197,8 @@ pub struct BookView {
     pub due: i64,
     pub tests: i64,
     pub mastered: i64,
+    /// Reviews counted against the daily limit so far in the user's local day.
+    pub reviewed_today: i64,
     pub now: i64,
     pub rules: Rules,
 }
@@ -522,6 +542,12 @@ impl VocabularyStore {
             )?
             .map(|r| serde_json::from_str(&r?).map_err(|_| fail("词条数据损坏")))
             .collect::<Result<Vec<_>, AppError>>()?;
+        let (day_start, day_end) = local_day(now, utc_offset());
+        let reviewed_today: i64 = c.query_row(
+            "SELECT count(*) FROM events WHERE action IN ('remember','fuzzy','forgot') AND at>=?1 AND at<?2",
+            params![day_start, day_end],
+            |r| r.get(0),
+        )?;
         let (total,due,tests,mastered)=c.query_row("SELECT count(*),coalesce(sum(state='review' AND due<=?1),0),coalesce(sum(state='test'),0),coalesce(sum(state='mastered'),0) FROM words",[now],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?)))?;
         Ok(BookView {
             entries,
@@ -529,6 +555,7 @@ impl VocabularyStore {
             due,
             tests,
             mastered,
+            reviewed_today,
             now,
             rules,
         })
@@ -611,11 +638,11 @@ impl VocabularyStore {
             if e.status != "review" || e.card.is_none() || e.next_due_at.is_none_or(|v| v > now) {
                 return Err(fail("尚未到复习时间，提前查看不计次数"));
             }
-            let today = now / 86400;
-            let done:i64=tx.query_row("SELECT count(*) FROM events WHERE action IN ('remember','fuzzy','forgot') AND at>=?1 AND at<?2",params![today*86400,(today+1)*86400],|r|r.get(0))?;
+            let (day_start, day_end) = local_day(now, utc_offset());
+            let done:i64=tx.query_row("SELECT count(*) FROM events WHERE action IN ('remember','fuzzy','forgot') AND at>=?1 AND at<?2",params![day_start,day_end],|r|r.get(0))?;
             // Current event is already in this transaction; failed eligibility rolls it back.
             if done > i64::from(rules.daily_limit) {
-                return Err(fail("今日复习上限已达到（按 UTC 日统计），明日再继续"));
+                return Err(fail("今日复习上限已达到，明天再继续"));
             }
             if rating == "remember" {
                 e.reviews = (e.reviews + 1).min(3);

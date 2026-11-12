@@ -16,6 +16,7 @@
   width: 100%; min-width: 0; border: 1px solid var(--line); border-radius: 8px; padding: 10px 11px; background: var(--surface); color: var(--text); font-size: 14px;
 }
 .settings-panels textarea { resize: vertical; }
+.settings-panels [aria-invalid="true"] { border-color: var(--danger) !important; outline: 2px solid color-mix(in srgb, var(--danger) 35%, transparent); outline-offset: 1px; }
 .settings-panels .checkbox-row { display: flex; align-items: center; gap: 8px; }
 .checkbox-row input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent-strong); }
 .ocr-card { display: grid; gap: 14px; }

@@ -21,8 +21,13 @@ pub enum AppError {
     Database(String),
     #[error("settings operation failed: {0}")]
     Settings(String),
-    #[error("global shortcut is invalid: {0}")]
-    InvalidShortcut(String),
+    /// A value the user entered was rejected. `field` is the settings form control it came
+    /// from, so the window can take the user to it; `message` is shown as written.
+    #[error("invalid setting {field}: {message}")]
+    InvalidSetting {
+        field: &'static str,
+        message: String,
+    },
     #[error("autostart operation failed: {0}")]
     AutoStart(String),
     #[error("OCR operation failed: {0}")]
@@ -43,6 +48,13 @@ pub enum AppError {
 }
 
 impl AppError {
+    pub fn invalid(field: &'static str, message: impl Into<String>) -> Self {
+        Self::InvalidSetting {
+            field,
+            message: message.into(),
+        }
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
             Self::NoSelectedText => "NO_SELECTED_TEXT",
@@ -54,7 +66,7 @@ impl AppError {
             Self::Provider(_) => "PROVIDER_ERROR",
             Self::Database(_) => "DATABASE_ERROR",
             Self::Settings(_) => "SETTINGS_ERROR",
-            Self::InvalidShortcut(_) => "INVALID_SHORTCUT",
+            Self::InvalidSetting { .. } => "INVALID_SETTING",
             Self::AutoStart(_) => "AUTOSTART_ERROR",
             Self::Ocr(_) => "OCR_ERROR",
             Self::OcrNoText => "OCR_NO_TEXT",
@@ -77,7 +89,7 @@ impl AppError {
             Self::Provider(message) => message.clone(),
             Self::Database(_) => "本地缓存暂时不可用".into(),
             Self::Settings(_) => "设置保存失败".into(),
-            Self::InvalidShortcut(_) => "全局快捷键格式无效或已被占用".into(),
+            Self::InvalidSetting { message, .. } => message.clone(),
             Self::AutoStart(_) => "无法更新开机启动设置".into(),
             Self::Ocr(message) => format!("OCR 识别失败：{message}"),
             Self::OcrNoText => "所选区域未识别到文字".into(),
@@ -95,9 +107,17 @@ impl Serialize for AppError {
     where
         S: Serializer,
     {
-        let mut value = serializer.serialize_struct("AppError", 2)?;
+        let field = match self {
+            Self::InvalidSetting { field, .. } => Some(*field),
+            _ => None,
+        };
+        let mut value =
+            serializer.serialize_struct("AppError", 2 + usize::from(field.is_some()))?;
         value.serialize_field("code", self.code())?;
         value.serialize_field("message", &self.user_message())?;
+        if let Some(field) = field {
+            value.serialize_field("field", field)?;
+        }
         value.end()
     }
 }

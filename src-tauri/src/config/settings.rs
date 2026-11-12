@@ -41,8 +41,9 @@ impl Default for AppearancePreferences {
 impl AppearancePreferences {
     pub fn validate(&self) -> Result<(), AppError> {
         if !(70..=100).contains(&self.popup_opacity) {
-            return Err(AppError::Settings(
-                "悬浮窗背景不透明度必须在 70% 到 100% 之间".into(),
+            return Err(AppError::invalid(
+                "popupTransparency",
+                "悬浮窗透明度必须在 0% 到 30% 之间",
             ));
         }
         Ok(())
@@ -238,27 +239,40 @@ impl SettingsStore {
         let ocr_shortcut = update.ocr_shortcut.trim().to_string();
         let cloud_ocr_model = update.cloud_ocr_model.trim().to_string();
         let cloud_ocr_base_url = update.cloud_ocr_base_url.trim();
-        if provider.is_empty()
-            || model.is_empty()
-            || global_shortcut.is_empty()
-            || ocr_shortcut.is_empty()
-        {
-            return Err(AppError::Settings("required settings are empty".into()));
+        for (field, value, message) in [
+            ("provider", &provider, "请选择服务商"),
+            ("model", &model, "请填写模型名称"),
+            ("globalShortcut", &global_shortcut, "请设置划词翻译快捷键"),
+            ("ocrShortcut", &ocr_shortcut, "请设置截图翻译快捷键"),
+        ] {
+            if value.is_empty() {
+                return Err(AppError::invalid(field, message));
+            }
         }
         if global_shortcut.eq_ignore_ascii_case(&ocr_shortcut) {
-            return Err(AppError::Settings("划词翻译与 OCR 快捷键不能相同".into()));
-        }
-        if update.ocr_engine == OcrEngineKind::Cloud
-            && (cloud_ocr_base_url.is_empty() || cloud_ocr_model.is_empty())
-        {
-            return Err(AppError::Settings(
-                "云端视觉 OCR 需要 Base URL 和模型名称".into(),
+            return Err(AppError::invalid(
+                "ocrShortcut",
+                "划词翻译与截图翻译的快捷键不能相同",
             ));
+        }
+        if update.ocr_engine == OcrEngineKind::Cloud {
+            if cloud_ocr_base_url.is_empty() {
+                return Err(AppError::invalid(
+                    "cloudOcrBaseUrl",
+                    "云端视觉 OCR 需要填写服务地址",
+                ));
+            }
+            if cloud_ocr_model.is_empty() {
+                return Err(AppError::invalid(
+                    "cloudOcrModel",
+                    "云端视觉 OCR 需要填写模型名称",
+                ));
+            }
         }
         let cloud_ocr_base_url = if cloud_ocr_base_url.is_empty() {
             String::new()
         } else {
-            validate_base_url(cloud_ocr_base_url)?
+            validate_base_url("cloudOcrBaseUrl", cloud_ocr_base_url)?
         };
 
         Ok(AppSettings {
@@ -266,7 +280,7 @@ impl SettingsStore {
             speech: update.speech.clone(),
             schema_version: CURRENT_SETTINGS_SCHEMA,
             provider,
-            base_url: validate_base_url(&update.base_url)?,
+            base_url: validate_base_url("baseUrl", &update.base_url)?,
             model,
             global_shortcut,
             ocr_shortcut,
@@ -289,31 +303,37 @@ impl SettingsStore {
     }
 }
 
-fn validate_base_url(value: &str) -> Result<String, AppError> {
+fn validate_base_url(field: &'static str, value: &str) -> Result<String, AppError> {
     let trimmed = value.trim().trim_end_matches('/');
-    let url =
-        reqwest::Url::parse(trimmed).map_err(|_| AppError::Settings("Base URL 格式无效".into()))?;
+    if trimmed.is_empty() {
+        return Err(AppError::invalid(field, "请填写服务地址"));
+    }
+    let url = reqwest::Url::parse(trimmed).map_err(|_| {
+        AppError::invalid(field, "服务地址格式无效，应类似 https://api.example.com/v1")
+    })?;
     if !url.username().is_empty() || url.password().is_some() {
-        return Err(AppError::Settings("Base URL 不允许包含用户名或密码".into()));
+        return Err(AppError::invalid(field, "服务地址不允许包含用户名或密码"));
     }
 
     match url.scheme() {
         "https" => {}
         "http" if is_loopback_host(url.host_str()) => {}
         "http" => {
-            return Err(AppError::Settings(
-                "远程 Provider 必须使用 HTTPS；HTTP 仅允许 localhost".into(),
+            return Err(AppError::invalid(
+                field,
+                "远程服务必须使用 HTTPS；HTTP 仅允许本机地址（localhost）",
             ));
         }
         _ => {
-            return Err(AppError::Settings(
-                "Base URL 仅支持 HTTPS，或用于本地模型的 HTTP localhost".into(),
+            return Err(AppError::invalid(
+                field,
+                "服务地址仅支持 HTTPS，或用于本地模型的 HTTP localhost",
             ));
         }
     }
 
     if url.host_str().is_none() {
-        return Err(AppError::Settings("Base URL 缺少主机名".into()));
+        return Err(AppError::invalid(field, "服务地址缺少主机名"));
     }
     Ok(trimmed.to_string())
 }

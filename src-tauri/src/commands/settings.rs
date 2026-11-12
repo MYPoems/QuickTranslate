@@ -32,6 +32,30 @@ pub struct DiagnosticsView {
     last_error: Option<DiagnosticError>,
 }
 
+/// The two global shortcuts, for windows that mention them in their own text.
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShortcutsView {
+    global_shortcut: String,
+    ocr_shortcut: String,
+}
+
+impl From<&AppSettings> for ShortcutsView {
+    fn from(settings: &AppSettings) -> Self {
+        Self {
+            global_shortcut: settings.global_shortcut.clone(),
+            ocr_shortcut: settings.ocr_shortcut.clone(),
+        }
+    }
+}
+
+#[tauri::command]
+pub fn get_shortcuts(app: AppHandle) -> Result<ShortcutsView, AppError> {
+    Ok(ShortcutsView::from(
+        &app.state::<AppState>().settings.get()?,
+    ))
+}
+
 #[tauri::command]
 pub fn get_appearance_preferences(
     app: AppHandle,
@@ -166,7 +190,9 @@ pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsV
         return Err(error);
     }
 
-    let _ = app.emit("appearance-changed", state.settings.get()?.appearance);
+    let saved = state.settings.get()?;
+    let _ = app.emit("shortcuts-changed", ShortcutsView::from(&saved));
+    let _ = app.emit("appearance-changed", saved.appearance);
     state.settings.view(
         state.secrets.as_ref(),
         app.autolaunch()
@@ -177,15 +203,16 @@ pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsV
 }
 
 fn replace_shortcuts(app: &AppHandle, translation: &str, ocr: &str) -> Result<(), AppError> {
+    const UNAVAILABLE: &str = "快捷键格式无效，或已被其他程序占用";
     app.global_shortcut()
         .unregister_all()
-        .map_err(|error| AppError::InvalidShortcut(error.to_string()))?;
+        .map_err(|error| AppError::Internal(error.to_string()))?;
     app.global_shortcut()
         .register(translation)
-        .map_err(|error| AppError::InvalidShortcut(error.to_string()))?;
+        .map_err(|_| AppError::invalid("globalShortcut", UNAVAILABLE))?;
     app.global_shortcut()
         .register(ocr)
-        .map_err(|error| AppError::InvalidShortcut(error.to_string()))
+        .map_err(|_| AppError::invalid("ocrShortcut", UNAVAILABLE))
 }
 
 fn replace_api_key(

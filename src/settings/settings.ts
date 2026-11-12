@@ -306,7 +306,7 @@ async function save(form: HTMLFormElement): Promise<void> {
     refreshOcrPanels(form);
     setStatus("设置已保存，快捷键和开机启动立即生效", "success");
   } catch (error) {
-    setStatus(errorMessage(error), "error");
+    reportError(form, error);
   } finally {
     setBusy(false);
   }
@@ -319,7 +319,7 @@ async function test(form: HTMLFormElement): Promise<void> {
     await invoke<string>("test_provider", { update: formValue(form) });
     setStatus("连接成功", "success");
   } catch (error) {
-    setStatus(errorMessage(error), "error");
+    reportError(form, error);
   } finally {
     setBusy(false);
   }
@@ -424,7 +424,7 @@ async function importSettings(form: HTMLFormElement): Promise<void> {
     refreshOcrPanels(form);
     setStatus("备份已载入表单，请确认后点击保存", "success");
   } catch (error) {
-    setStatus(errorMessage(error), "error");
+    reportError(form, error);
   } finally {
     setBusy(false);
   }
@@ -641,7 +641,7 @@ async function testCloudSpeech(form: HTMLFormElement): Promise<void> {
   try {
     const timing = await invoke<{ firstAudioMs: number; totalMs: number; cached: boolean }>("test_cloud_speech", { update: formValue(form) });
     setStatus(`云端朗读连接成功，首音频 ${timing.firstAudioMs} ms，合成总耗时 ${timing.totalMs} ms（不等于实际播放延迟）`, "success");
-  } catch (error) { setStatus(errorMessage(error), "error"); }
+  } catch (error) { reportError(form, error); }
   finally { setBusy(false); }
 }
 function renderUpdate(progress: UpdateProgress): void {
@@ -681,6 +681,27 @@ function setStatus(message: string, kind: "neutral" | "success" | "error"): void
   const status = root.querySelector<HTMLElement>("#status")!;
   status.textContent = message;
   status.dataset.kind = kind;
+}
+
+const fieldSelectors: Record<string, string> = { settingsBackup: "#settings-backup" };
+
+// Shows a failure and, when the backend names the form control it rejected, takes the user
+// to it: opens its category, reveals it, marks it invalid and focuses it.
+function reportError(form: HTMLFormElement, error: unknown): void {
+  setStatus(errorMessage(error), "error");
+  const field = (error as AppError | null)?.field;
+  if (!field) return;
+  const named = form.elements.namedItem(field);
+  const control = (named instanceof HTMLElement ? named : null) ?? root.querySelector<HTMLElement>(fieldSelectors[field] || "[data-no-such-field]");
+  if (!control) return;
+  const panel = control.closest<HTMLElement>("[data-settings-panel]")?.dataset.settingsPanel;
+  if (panel) selectSettingsPanel(form, panel);
+  const details = control.closest("details");
+  if (details) details.open = true;
+  control.setAttribute("aria-invalid", "true");
+  control.addEventListener("input", () => control.removeAttribute("aria-invalid"), { once: true });
+  control.addEventListener("change", () => control.removeAttribute("aria-invalid"), { once: true });
+  control.focus();
 }
 
 function errorMessage(error: unknown): string {

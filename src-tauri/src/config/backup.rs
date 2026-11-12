@@ -47,10 +47,11 @@ impl Default for SettingsBackup {
 
 pub fn parse_settings_backup(contents: &str) -> Result<SettingsBackup, AppError> {
     let backup: SettingsBackup = serde_json::from_str(contents)
-        .map_err(|error| AppError::Settings(format!("备份 JSON 无效：{error}")))?;
+        .map_err(|error| AppError::invalid("settingsBackup", format!("备份 JSON 无效：{error}")))?;
     if backup.schema_version > CURRENT_SETTINGS_SCHEMA {
-        return Err(AppError::Settings(
-            "该备份来自更高版本，当前版本无法导入".into(),
+        return Err(AppError::invalid(
+            "settingsBackup",
+            "该备份来自更高版本，当前版本无法导入",
         ));
     }
     let normalized = SettingsStore::validate(&UpdateSettings {

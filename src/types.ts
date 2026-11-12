@@ -46,6 +46,8 @@ export interface TranslationResult {
 export interface AppError {
   code: string;
   message: string;
+  /** Name of the settings form control the backend rejected, when there is one. */
+  field?: string;
 }
 
 export interface TranslationEvent {

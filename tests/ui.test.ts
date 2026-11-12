@@ -36,6 +36,7 @@ async function mount(entry: "settings" | "popup" | "history") {
       if (command === "list_speech_voices") return [{ id: "zh-test", name: "Test Chinese", language: "zh-CN" }];
       if (command === "get_update_state") return update;
       if (command === "get_popup_pinned") return false;
+      if (command === "get_shortcuts") return { globalShortcut: "Ctrl+Shift+T", ocrShortcut: "Alt+W" };
       if (command === "save_settings") return { ...settings, ...args.update as object };
       if (command === "check_for_updates") {
         update = { phase: "available", version: "1.3.0", downloaded: 0, message: "发现新版本", releaseNotes: "Test release" };
@@ -157,6 +158,37 @@ test("popup retains OCR after errors, speaks edits, marks stale bilingual output
     assert.equal(element<HTMLButtonElement>("#read-translation").disabled, true);
     element("#close").click(); await settle(); assert.ok(calls.some(call => call.command === "hide_translation_window"));
     assert.equal(element("#reading-status").hidden, true);
+  } finally { close(); }
+});
+
+test("popup names the configured shortcut and follows changes to it", async () => {
+  const { element, qa, close } = await mount("popup");
+  try {
+    assert.equal(element("#source").textContent, "选择文字后按 Ctrl + Shift + T");
+    qa.emit("shortcuts-changed", { globalShortcut: "Alt+E", ocrShortcut: "Alt+W" });
+    assert.equal(element("#source").textContent, "选择文字后按 Alt + E");
+    qa.emit("translation-state", { requestId: 1, status: "loading", sourceText: "Hello", sourceKind: "selection" });
+    qa.emit("shortcuts-changed", { globalShortcut: "Alt+Z", ocrShortcut: "Alt+W" });
+    assert.doesNotMatch(element("#source").textContent || "", /选择文字后按/, "a translation in view is not replaced by the hint");
+  } finally { close(); }
+});
+
+test("a rejected setting shows the backend's reason and takes the user to the field", async () => {
+  const { element, qa, dom, close } = await mount("settings");
+  try {
+    const original = qa.invoke;
+    qa.invoke = async (command, args = {}) => { if (command === "save_settings") throw { code: "INVALID_SETTING", message: "划词翻译与截图翻译的快捷键不能相同", field: "ocrShortcut" }; return original(command, args); };
+    const form = element<HTMLFormElement>("#settings-form");
+    assert.equal(element("#settings-ocr").hidden, true);
+    form.dispatchEvent(new dom.window.Event("submit", { cancelable: true })); await settle();
+    assert.equal(element("#status").textContent, "划词翻译与截图翻译的快捷键不能相同");
+    assert.equal(element("#status").dataset.kind, "error");
+    assert.equal(element("#settings-ocr").hidden, false, "the category holding the field is opened");
+    const field = element<HTMLInputElement>('[name="ocrShortcut"]');
+    assert.equal(field.getAttribute("aria-invalid"), "true");
+    assert.equal(dom.window.document.activeElement, field);
+    field.dispatchEvent(new dom.window.Event("input"));
+    assert.equal(field.hasAttribute("aria-invalid"), false);
   } finally { close(); }
 });
 

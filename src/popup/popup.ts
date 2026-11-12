@@ -12,7 +12,7 @@ const el = <T extends HTMLElement>(selector: string) => root.querySelector<T>(se
 let currentRequestId = 0, localGeneration = 0, readStart = 0;
 let currentSource = "", currentTranslation = "", selectedWord = "", selectionSource = "";
 let currentSourceKind: "selection" | "ocr" = "selection";
-let pinned = false, translationStale = false;
+let pinned = false, translationStale = false, shortcutLabel = "Alt + Q";
 let readingSide: ReadSide | undefined;
 const reader = new Reader(prepareSpeech, browserAudio, renderReading);
 
@@ -22,7 +22,7 @@ export function mountPopup(): void {
       <div class="popup-drag-region" data-tauri-drag-region aria-label="拖动悬浮窗"></div><div class="popup-window-controls">
       <button id="pin" class="icon-button" type="button" aria-label="固定悬浮窗" aria-pressed="false" title="固定悬浮窗">${icon("pin")}</button>
       <button id="close" class="icon-button" type="button" aria-label="关闭">${icon("close")}</button></div></header>
-    <div class="source-row"><p id="source" class="source">选择文字后按 Alt + Q</p><span id="badge" class="badge" hidden></span></div>
+    <div class="source-row"><p id="source" class="source"></p><span id="badge" class="badge" hidden></span></div>
     <div id="content" class="content idle"><p class="hint">QuickTranslate 将在这里显示译文</p></div>
     <p id="reading-status" class="reading-status" role="status" hidden></p>
     <footer class="actions">
@@ -76,9 +76,15 @@ export function mountPopup(): void {
     else if (event.ctrlKey && event.key.toLowerCase() === "c" && currentTranslation && !window.getSelection()?.toString()) { event.preventDefault(); void copyText(currentTranslation, "#copy", true); }
     else if (event.altKey && event.key.toLowerCase() === "r" && currentSource) { event.preventDefault(); void retranslate(); }
   });
+  renderIdleHint();
+  const applyShortcuts = (value?: { globalShortcut?: string }) => { if (value?.globalShortcut) { shortcutLabel = value.globalShortcut.split("+").map(part => part.trim()).filter(Boolean).join(" + "); renderIdleHint(); } };
+  void invoke<{ globalShortcut: string }>("get_shortcuts").then(applyShortcuts).catch(() => {});
+  void listen<{ globalShortcut: string }>("shortcuts-changed", ({ payload }) => applyShortcuts(payload));
   void invoke<boolean>("get_popup_pinned").then(updatePin).catch(() => {});
   void listen<TranslationEvent>("translation-state", ({ payload }) => { if (payload.status === "loading" && payload.requestId >= currentRequestId) { collector.close(); closeMenu(); selectedWord = ""; selectionSource = ""; } render(payload); }).then(() => emit("popup-ready"));
 }
+// The header line before anything has been translated; it names the shortcut the user set.
+function renderIdleHint(): void { if (!currentRequestId) el("#source").textContent = `选择文字后按 ${shortcutLabel}`; }
 function closeMenu(): void { el("#popup-menu").hidden = true; el("#more").setAttribute("aria-expanded", "false"); }
 function refreshCollection(): void {
   const word = selectedWord || currentSource.trim(); const valid = word.length <= 48 && /^[A-Za-z]+(?:['’-][A-Za-z]+)*$/.test(word);

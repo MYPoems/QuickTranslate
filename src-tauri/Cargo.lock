@@ -2769,7 +2769,7 @@ dependencies = [
 
 [[package]]
 name = "quicktranslate"
-version = "1.6.2"
+version = "1.7.0"
 dependencies = [
  "anyhow",
  "async-trait",

@@ -190,10 +190,12 @@ impl SecretStore for KeyringSecretStore {
     }
 }
 
-/// An in-memory store for tests and the isolated QA mode.
+/// An in-memory store for tests and the isolated QA mode; release builds have no use for it.
+#[cfg(any(test, debug_assertions))]
 #[derive(Default)]
 pub struct MemorySecretStore(std::sync::Mutex<std::collections::BTreeMap<String, String>>);
 
+#[cfg(any(test, debug_assertions))]
 impl SecretStore for MemorySecretStore {
     fn read(&self, account: &str) -> Result<Option<String>, AppError> {
         Ok(self.0.lock().unwrap().get(account).cloned())

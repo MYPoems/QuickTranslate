@@ -8,9 +8,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
-    VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+use windows::Win32::UI::{
+    Input::KeyboardAndMouse::{
+        GetAsyncKeyState, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
+        VIRTUAL_KEY, VK_CONTROL, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+    },
+    WindowsAndMessaging::{
+        GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId, GUITHREADINFO,
+    },
 };
 
 use crate::errors::AppError;
@@ -85,6 +90,7 @@ pub fn capture_selected_text() -> Result<String, AppError> {
 
     let original = with_retries(|| clipboard::snapshot().ok());
     let original_sequence = clipboard::sequence_number();
+    let targets = target_processes();
 
     send_copy_shortcut()?;
 
@@ -112,7 +118,12 @@ pub fn capture_selected_text() -> Result<String, AppError> {
     // Decided once, right after the copy was observed. The sequence number cannot be used to
     // detect a later copy by the user here: reading delay-rendered data (ours above, and the
     // clipboard history service's) advances it as well.
-    let restored = match plan_restore(original.as_ref(), copy_landed) {
+    //
+    // A change is only undone when the target wrote it. Anything another program happened to
+    // put there in the meantime (a clipboard manager, a sync from another device) is not our
+    // copy, and replacing it with the old text would destroy it.
+    let ours = copy_landed && written_by_target(clipboard::owner_process(), &targets);
+    let restored = match plan_restore(original.as_ref(), ours) {
         Restore::Keep => Some(()),
         Restore::Text(text) => with_retries(|| clipboard::write_text(text).ok()),
         Restore::Clear => with_retries(|| clipboard::clear().ok()),
@@ -122,6 +133,46 @@ pub fn capture_selected_text() -> Result<String, AppError> {
     }
 
     captured.ok_or(AppError::NoSelectedText)
+}
+
+/// The processes a copy by the foreground application can come from: the one owning its
+/// top-level window and the one owning its focused control. They differ for hosted
+/// applications, where a frame host owns the window and the application the content.
+fn target_processes() -> Vec<u32> {
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground.0.is_null() {
+        return Vec::new();
+    }
+    let mut processes = Vec::with_capacity(2);
+    let mut process = 0;
+    let thread = unsafe { GetWindowThreadProcessId(foreground, Some(&mut process)) };
+    if process != 0 {
+        processes.push(process);
+    }
+    let mut info = GUITHREADINFO {
+        cbSize: size_of::<GUITHREADINFO>() as u32,
+        ..Default::default()
+    };
+    if thread != 0 && unsafe { GetGUIThreadInfo(thread, &mut info) }.is_ok() {
+        let mut focused = 0;
+        if !info.hwndFocus.0.is_null() {
+            unsafe { GetWindowThreadProcessId(info.hwndFocus, Some(&mut focused)) };
+        }
+        if focused != 0 && !processes.contains(&focused) {
+            processes.push(focused);
+        }
+    }
+    processes
+}
+
+/// Whether the clipboard's current content was put there by the application the copy
+/// shortcut went to. An owner that cannot be identified is given the benefit of the doubt:
+/// the alternative is to stop restoring for every application that copies without one.
+fn written_by_target(owner: Option<u32>, targets: &[u32]) -> bool {
+    match owner {
+        Some(owner) => targets.is_empty() || targets.contains(&owner),
+        None => true,
+    }
 }
 
 /// Clipboard listeners (clipboard history, vendor utilities) briefly hold the clipboard open
@@ -251,6 +302,15 @@ mod tests {
         assert_eq!(plan_restore(Some(&original), true), Restore::Text("before"));
         // The copy never happened: the clipboard still holds what it held.
         assert_eq!(plan_restore(Some(&original), false), Restore::Keep);
+    }
+
+    #[test]
+    fn only_a_copy_written_by_the_target_counts_as_ours() {
+        assert!(written_by_target(Some(7), &[7, 9]));
+        assert!(written_by_target(Some(9), &[7, 9]));
+        assert!(!written_by_target(Some(8), &[7, 9]), "another program");
+        assert!(written_by_target(None, &[7, 9]), "owner not identifiable");
+        assert!(written_by_target(Some(8), &[]), "target not identifiable");
     }
 
     #[test]

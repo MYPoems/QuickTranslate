@@ -5,6 +5,7 @@ import { organizeSettings, loadAppearance, appearanceFromForm, selectSettingsPan
 import { attachShortcutRecorder } from "./shortcut";
 import { formatCapture } from "./diagnostics";
 import { mountOnboarding } from "./onboarding";
+import { formatGlossary, languageNames, languages, parseGlossary } from "../languages";
 import type {
   AppError,
   DiagnosticsView,
@@ -16,6 +17,7 @@ import type {
   SpeechVoice,
   UpdateProgress,
   SpeechPluginStatus,
+  Language,
   VocabularyRules,
 } from "../types";
 import "./settings.css";
@@ -66,6 +68,18 @@ export function mountSettings(): void {
         <label>服务地址<input name="baseUrl" type="url" required placeholder="https://api.openai.com/v1" /></label>
         <label>模型<input name="model" required placeholder="gpt-4.1-mini" /></label>
         <label>API Key<input name="apiKey" type="password" autocomplete="off" placeholder="留空则不修改；本地模型可留空" /></label>
+        <section class="ocr-card translation-card">
+          <strong>语言与用词</strong>
+          <div class="language-pair">
+            <label>我阅读的语言<select name="primaryLanguage"></select></label>
+            <label>它译成<select name="secondaryLanguage"></select></label>
+          </div>
+          <p>其他语言的文字都会译成你阅读的语言；这种语言的文字译成右边选的语言。在悬浮窗的“更多”里可以为单次翻译另选目标语言。</p>
+          <label>术语表<textarea name="glossary" rows="4" spellcheck="false" placeholder="每行一条：原文 = 译文&#10;pipeline = 流水线"></textarea></label>
+          <p>只有出现在原文里的术语才会随请求发送，最多 200 条。</p>
+          <label>附加翻译要求<textarea name="translationInstructions" rows="2" maxlength="600" placeholder="例如：使用正式书面语；人名保留原文"></textarea></label>
+          <p>会附加在固定的翻译指令之后，不改变输出格式。修改术语表或附加要求后，已缓存的译文不会再被使用。</p>
+        </section>
         <div class="shortcut-field"><label>划词翻译快捷键<input name="globalShortcut" required readonly placeholder="Alt+Q" aria-describedby="globalShortcut-hint" /></label><p id="globalShortcut-hint" class="field-hint" role="status"></p></div>
         <div class="shortcut-field"><label>截图翻译快捷键<input name="ocrShortcut" required readonly placeholder="Alt+W" aria-describedby="ocrShortcut-hint" /></label><p id="ocrShortcut-hint" class="field-hint" role="status"></p></div>
         <section class="ocr-card">
@@ -196,6 +210,10 @@ export function mountSettings(): void {
     </section>`;
 
   const form = root.querySelector<HTMLFormElement>("#settings-form")!;
+  for (const name of ["primaryLanguage", "secondaryLanguage"]) {
+    const select = form.elements.namedItem(name) as HTMLSelectElement;
+    for (const language of languages) select.add(new Option(languageNames[language], language));
+  }
   organizeSettings(root, form);
   (form.elements.namedItem("speechProvider") as HTMLSelectElement).addEventListener("change", () => refreshSpeechPanels(form));
   root.querySelector("#open-speech-key-page")!.addEventListener("click", () => void openKeyPage());
@@ -293,6 +311,7 @@ async function load(form: HTMLFormElement): Promise<void> {
     setInput(form, "ocrLanguage", settings.ocrLanguage);
     setInput(form, "cloudOcrBaseUrl", settings.cloudOcrBaseUrl);
     setInput(form, "cloudOcrModel", settings.cloudOcrModel);
+    loadTranslation(form, settings.translation);
     setCheckbox(form, "autoStartEnabled", settings.autoStartEnabled);
     await loadVoices(form, settings.speech);
     apiKeyConfigured = settings.apiKeyConfigured;
@@ -327,7 +346,7 @@ function clearKeyInputs(form: HTMLFormElement): void {
 function panelStates(form: HTMLFormElement): Map<string, string> {
   const states = new Map<string, string>();
   form.querySelectorAll<HTMLElement>("[data-settings-panel]").forEach(panel => {
-    const fields = Array.from(panel.querySelectorAll<HTMLInputElement | HTMLSelectElement>("input[name], select[name]"));
+    const fields = Array.from(panel.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>("input[name], select[name], textarea[name]"));
     states.set(panel.dataset.settingsPanel!, fields.map(field => `${field.name}=${field instanceof HTMLInputElement && field.type === "checkbox" ? field.checked : field.value}`).join("\n"));
   });
   return states;
@@ -522,6 +541,7 @@ async function importSettings(form: HTMLFormElement): Promise<void> {
     setInput(form, "ocrLanguage", backup.ocrLanguage);
     setInput(form, "cloudOcrBaseUrl", backup.cloudOcrBaseUrl);
     setInput(form, "cloudOcrModel", backup.cloudOcrModel);
+    loadTranslation(form, backup.translation);
     setCheckbox(form, "autoStartEnabled", backup.autoStartEnabled);
     loadAppearance(form, backup.appearance);
     await loadVoices(form, backup.speech || defaultSpeech);
@@ -566,6 +586,12 @@ function formValue(form: HTMLFormElement): UpdateSettings {
   return {
     appearance: appearanceFromForm(form),
     speech: { provider: String(data.get("speechProvider") || "cloud") as "cloud" | "offline", cloudEndpoint: String(data.get("cloudSpeechEndpoint") || defaultSpeech.cloudEndpoint), cloudModel: String(data.get("cloudSpeechModel") || defaultSpeech.cloudModel).trim(), cloudChineseVoice: String(data.get("cloudChineseVoice") || "Cherry").trim(), cloudEnglishVoice: String(data.get("cloudEnglishVoice") || "Cherry").trim(), threads: Number(data.get("speechThreads") || 4), rate: Number(data.get("speechRate") || 100), chineseVoice: String(data.get("chineseVoice") || ""), englishVoice: String(data.get("englishVoice") || ""), bilingual: data.get("bilingual") === "on" },
+    translation: {
+      primaryLanguage: String(data.get("primaryLanguage") || "chinese") as Language,
+      secondaryLanguage: String(data.get("secondaryLanguage") || "english") as Language,
+      glossary: parseGlossary(String(data.get("glossary") || "")),
+      instructions: String(data.get("translationInstructions") || "").trim(),
+    },
     provider: String(data.get("provider") || "OpenAI Compatible"),
     baseUrl: String(data.get("baseUrl") || "").trim(),
     model: String(data.get("model") || "").trim(),
@@ -585,8 +611,15 @@ function formValue(form: HTMLFormElement): UpdateSettings {
   };
 }
 
+function loadTranslation(form: HTMLFormElement, value: SettingsView["translation"]): void {
+  setInput(form, "primaryLanguage", value?.primaryLanguage || "chinese");
+  setInput(form, "secondaryLanguage", value?.secondaryLanguage || "english");
+  setInput(form, "glossary", formatGlossary(value?.glossary));
+  setInput(form, "translationInstructions", value?.instructions || "");
+}
+
 function setInput(form: HTMLFormElement, name: string, value: string): void {
-  (form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement).value = value;
+  (form.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement).value = value;
 }
 
 function setCheckbox(form: HTMLFormElement, name: string, checked: boolean): void {

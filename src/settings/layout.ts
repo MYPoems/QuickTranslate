@@ -75,10 +75,11 @@ export function organizeSettings(root: HTMLElement, form: HTMLFormElement): void
   }
   move("#key-status", "translation");
   move("#translation-actions", "translation");
+  move(".translation-card", "translation");
   const globalShortcut = form.querySelector('[name="globalShortcut"]')!.closest(".shortcut-field")!;
   const ocrShortcut = form.querySelector('[name="ocrShortcut"]')!.closest(".shortcut-field")!;
   panelMap.get("ocr")!.append(ocrShortcut);
-  move(".ocr-card:not(.speech-card)", "ocr");
+  move(".ocr-card:not(.speech-card):not(.translation-card)", "ocr");
   move(".speech-card", "speech");
   form.querySelector('[name="bilingual"]')?.closest("label")?.remove();
   const appearance = document.createElement("section");

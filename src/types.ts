@@ -1,4 +1,13 @@
-export type Language = "chinese" | "english";
+export type Language = "chinese" | "english" | "japanese" | "korean" | "french" | "german" | "spanish" | "russian";
+/** Between which languages to translate, and with which terms and extra requirements. */
+export interface TranslationPreferences {
+  /** The language the user reads; anything else is translated into it. */
+  primaryLanguage: Language;
+  /** What text in the primary language is translated into. */
+  secondaryLanguage: Language;
+  glossary: Array<{ source: string; target: string }>;
+  instructions: string;
+}
 export type OcrEngineKind = "windows" | "paddle" | "cloud";
 export type OcrLanguage = "auto" | "chinese" | "english";
 export interface AppearancePreferences {
@@ -62,6 +71,7 @@ export interface TranslationEvent {
 export interface SettingsView {
   appearance: AppearancePreferences;
   speech: SpeechPreferences;
+  translation?: TranslationPreferences;
   provider: string;
   baseUrl: string;
   model: string;
@@ -81,6 +91,7 @@ export interface SettingsView {
 export interface UpdateSettings {
   appearance: AppearancePreferences;
   speech: SpeechPreferences;
+  translation: TranslationPreferences;
   provider: string;
   baseUrl: string;
   model: string;
@@ -144,6 +155,7 @@ export interface HistoryEntry {
 export interface SettingsBackup {
   appearance: AppearancePreferences;
   speech: SpeechPreferences;
+  translation?: TranslationPreferences;
   schemaVersion: number;
   provider: string;
   baseUrl: string;

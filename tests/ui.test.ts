@@ -455,6 +455,59 @@ test("a long selection starts collapsed so the translation stays in view", async
   } finally { close(); }
 });
 
+test("popup names any language pair and can ask for another target for the text on screen", async () => {
+  const { element, qa, calls, dom, close } = await mount("popup");
+  try {
+    const result = (requestId: number, detectedLanguage: string, targetLanguage: string) => ({ requestId, status: "success", sourceKind: "selection", result: { sourceText: "原文", translation: "译文", detectedLanguage, targetLanguage, provider: "QA", model: "test", cached: false } });
+    const target = element<HTMLSelectElement>("#target-language");
+    assert.equal(target.disabled, true, "nothing to retranslate yet");
+    qa.emit("translation-state", result(1, "japanese", "chinese"));
+    assert.equal(element("#source").textContent, "划词翻译 · 日文 → 中文");
+    assert.equal(target.disabled, false);
+    assert.equal(element<HTMLButtonElement>("#read-source").disabled, true, "there is no voice for Japanese");
+    assert.equal(element<HTMLButtonElement>("#read-translation").disabled, false);
+    assert.deepEqual(Array.from(target.options).map(option => option.value), ["", "chinese", "english", "japanese", "korean", "french", "german", "spanish", "russian"]);
+
+    const original = qa.invoke;
+    qa.invoke = async (command, args = {}) => command === "retranslate_text" ? (calls.push({ command, args }), result(1, "japanese", "english").result) : original(command, args);
+    target.value = "english"; target.dispatchEvent(new dom.window.Event("change")); await settle();
+    assert.equal(calls.find(call => call.command === "retranslate_text")?.args.target, "english");
+    assert.equal(element("#source").textContent, "划词翻译 · 日文 → EN");
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "r", altKey: true })); await settle();
+    assert.equal(calls.filter(call => call.command === "retranslate_text").at(-1)?.args.target, "english", "the choice holds for this text");
+
+    qa.emit("translation-state", result(2, "english", "chinese"));
+    assert.equal(target.value, "", "and resets for the next one");
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "r", altKey: true })); await settle();
+    assert.equal(calls.filter(call => call.command === "retranslate_text").at(-1)?.args.target, undefined);
+  } finally { close(); }
+});
+
+test("settings carry the language pair, glossary and extra requirements", async () => {
+  const { parseGlossary, formatGlossary } = await import("../src/languages");
+  assert.deepEqual(parseGlossary(" pipeline = 流水线 \n\ntoken＝令牌\nlonely"), [{ source: "pipeline", target: "流水线" }, { source: "token", target: "令牌" }, { source: "lonely", target: "" }]);
+  assert.equal(formatGlossary([{ source: "a", target: "甲" }]), "a = 甲");
+
+  const { element, calls, dom, close } = await mount("settings", { get_settings: { ...settings, translation: { primaryLanguage: "english", secondaryLanguage: "french", glossary: [{ source: "pipeline", target: "流水线" }], instructions: "正式语气" } } });
+  try {
+    assert.equal(element<HTMLSelectElement>('[name="primaryLanguage"]').value, "english");
+    assert.equal(element<HTMLSelectElement>('[name="secondaryLanguage"]').value, "french");
+    assert.equal(element<HTMLTextAreaElement>('[name="glossary"]').value, "pipeline = 流水线");
+    assert.equal(element('[name="glossary"]').closest("[data-settings-panel]")?.id, "settings-translation");
+    assert.equal(element<HTMLButtonElement>("#save").disabled, true);
+    const glossary = element<HTMLTextAreaElement>('[name="glossary"]'); glossary.value += "\ntoken = 令牌"; glossary.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    assert.equal(element<HTMLButtonElement>("#save").disabled, false, "editing the glossary is an unsaved change");
+    element<HTMLFormElement>("form").dispatchEvent(new dom.window.Event("submit", { cancelable: true })); await settle();
+    assert.deepEqual((calls.find(call => call.command === "save_settings")!.args.update as { translation: unknown }).translation, { primaryLanguage: "english", secondaryLanguage: "french", glossary: [{ source: "pipeline", target: "流水线" }, { source: "token", target: "令牌" }], instructions: "正式语气" });
+  } finally { close(); }
+
+  const plain = await mount("settings");
+  try {
+    assert.equal(plain.element<HTMLSelectElement>('[name="primaryLanguage"]').value, "chinese", "settings from an earlier version get the defaults");
+    assert.equal(plain.element<HTMLSelectElement>('[name="secondaryLanguage"]').value, "english");
+  } finally { plain.close(); }
+});
+
 test("popup yields Ctrl+C to an in-flight selection capture and drops the old source when a new request fails outright", async () => {
   const { element, qa, calls, dom, close } = await mount("popup");
   try {

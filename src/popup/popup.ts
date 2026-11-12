@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { emit, listen } from "@tauri-apps/api/event";
-import type { AppError, TranslationEvent, TranslationResult, SpeechPreferences } from "../types";
+import type { AppError, Language, TranslationEvent, TranslationResult, SpeechPreferences } from "../types";
+import { directionLabel, languageNames, languages } from "../languages";
 import { prepareSpeech, unlockSpeechAudio } from "../speech/stream";
 import { Reader, browserAudio, splitSpeech, type ReadSide, type ReaderState } from "../speech/reader";
 import { mountCollector } from "../vocabulary/collect";
@@ -29,6 +30,12 @@ let selectedWord = "";
 let selectionSource = "";
 let pinned = false;
 let shortcutLabel = "Alt + Q";
+// A language picked in the menu for the text on screen, instead of the usual direction.
+let targetOverride: Language | "" = "";
+// The languages of the result on screen. Reading aloud has voices for Chinese and English only.
+let sourceLanguage: Language | undefined;
+let translationLanguage: Language | undefined;
+const speakable = (language: Language | undefined) => !language || language === "chinese" || language === "english";
 let toastTimer = 0;
 let readingSide: ReadSide | undefined;
 const reader = new Reader(prepareSpeech, browserAudio, renderReading);
@@ -50,6 +57,7 @@ export function mountPopup(): void {
         <button id="retranslate" role="menuitem" type="button" disabled>重新翻译 <small>Alt+R</small></button>
         <button id="copy-source" role="menuitem" type="button" disabled>复制原文 <small>Ctrl+Shift+C</small></button>
         <button id="manual-input" role="menuitem" type="button">手动输入翻译 <small>Alt+I</small></button>
+        <label class="menu-select">译成<select id="target-language" disabled><option value="">自动</option></select></label>
         <hr><button id="collect-batch" role="menuitem" type="button">选取生词 / 批量收藏</button>
         <button id="open-book" role="menuitem" type="button">打开生词本</button>
         <hr><details><summary>模型与请求信息</summary><p id="meta">就绪</p></details>
@@ -66,6 +74,13 @@ export function mountPopup(): void {
   el("#copy-source").addEventListener("click", () => { closeMenu(); void copyText(currentSource, "已复制原文"); });
   el("#retranslate").addEventListener("click", () => { closeMenu(); void retranslate(); });
   el("#manual-input").addEventListener("click", () => { closeMenu(); openManualInput(); });
+  const targetSelect = el<HTMLSelectElement>("#target-language");
+  for (const language of languages) targetSelect.add(new Option(languageNames[language], language));
+  targetSelect.addEventListener("change", () => {
+    targetOverride = targetSelect.value as Language | "";
+    closeMenu();
+    void retranslate();
+  });
   el("#pin").addEventListener("click", () => void togglePin());
   el("#close").addEventListener("click", () => void hide());
   el("#more").addEventListener("mousedown", event => event.preventDefault());
@@ -252,16 +267,14 @@ function buildOcrSource(): HTMLElement {
   return section;
 }
 
-function directionLabel(result?: TranslationResult): string {
-  if (!result) return "";
-  return ` · ${result.detectedLanguage === "english" ? "EN → 中文" : "中文 → EN"}`;
-}
-
 function render(event: TranslationEvent): void {
   if (event.requestId < currentRequestId) return;
   if (event.requestId > currentRequestId) {
     selectedWord = "";
     selectionSource = "";
+    // A language chosen for the previous text does not carry over to the next one.
+    targetOverride = "";
+    el<HTMLSelectElement>("#target-language").value = "";
     // A new request that fails before any "loading" event (no selection found) has no source
     // of its own; do not leave the previous request's text on screen and behind the buttons.
     if (event.status === "error") currentSource = "";
@@ -277,10 +290,13 @@ function render(event: TranslationEvent): void {
     currentSourceKind = event.sourceKind || "selection";
     currentSource = event.sourceText || "";
     currentTranslation = "";
+    sourceLanguage = translationLanguage = undefined;
   } else if (event.result) {
     currentSourceKind = event.sourceKind || currentSourceKind;
     currentSource = event.result.sourceText;
     currentTranslation = event.result.translation;
+    sourceLanguage = event.result.detectedLanguage;
+    translationLanguage = event.result.targetLanguage;
     translationStale = false;
   } else if (event.status === "error") {
     currentTranslation = "";
@@ -289,7 +305,8 @@ function render(event: TranslationEvent): void {
   const content = el("#content");
   content.className = event.status === "error" ? "content failed" : "content";
   content.replaceChildren();
-  el("#source").textContent = `${currentSourceKind === "ocr" ? "截图翻译 · OCR" : "划词翻译"}${directionLabel(event.result)}`;
+  const direction = event.result ? ` · ${directionLabel(event.result.detectedLanguage, event.result.targetLanguage)}` : "";
+  el("#source").textContent = `${currentSourceKind === "ocr" ? "截图翻译 · OCR" : "划词翻译"}${direction}`;
   if (currentSource) content.append(currentSourceKind === "ocr" ? buildOcrSource() : buildSelectionSource(currentSource));
   content.append(buildHeading("译文", "朗读译文", "read-translation", "translation"));
   if (event.status === "error") content.append(buildError(event.error, !!currentSource.trim(), shortcutLabel));
@@ -299,6 +316,7 @@ function render(event: TranslationEvent): void {
   el<HTMLButtonElement>("#copy").disabled = !currentTranslation;
   el<HTMLButtonElement>("#copy-source").disabled = !currentSource;
   el<HTMLButtonElement>("#retranslate").disabled = !currentSource || loading;
+  el<HTMLSelectElement>("#target-language").disabled = !currentSource || loading;
   el("#meta").textContent = event.result ? `${event.result.provider} · ${event.result.model}` : event.error?.code || "正在请求服务";
   el("#badge").textContent = event.result?.cached ? "缓存" : "";
   el("#badge").hidden = !event.result?.cached;
@@ -354,7 +372,7 @@ async function retranslate(): Promise<void> {
   const generation = localGeneration;
   const current = () => currentRequestId === requestId && generation === localGeneration;
   try {
-    const result = await invoke<TranslationResult>("retranslate_text", { text: sourceText, requestId, generation });
+    const result = await invoke<TranslationResult>("retranslate_text", { text: sourceText, requestId, generation, target: targetOverride || undefined });
     if (current()) render({ requestId, status: "success", result, sourceKind });
   } catch (error) {
     if (current()) render({ requestId, status: "error", error: normalizeError(error) });
@@ -410,10 +428,17 @@ async function hide(): Promise<void> {
 }
 
 function refreshReadingButtons(): void {
+  const unsupported = "暂不支持朗读这种语言";
   const source = root.querySelector<HTMLButtonElement>("#read-source");
-  if (source) source.disabled = !currentSource.trim();
+  if (source) {
+    source.disabled = !currentSource.trim() || !speakable(sourceLanguage);
+    if (!speakable(sourceLanguage)) source.title = unsupported;
+  }
   const translation = root.querySelector<HTMLButtonElement>("#read-translation");
-  if (translation) translation.disabled = !currentTranslation.trim() || translationStale;
+  if (translation) {
+    translation.disabled = !currentTranslation.trim() || translationStale || !speakable(translationLanguage);
+    if (!speakable(translationLanguage)) translation.title = unsupported;
+  }
 }
 
 function stopReading(backend = true): void {

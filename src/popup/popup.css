@@ -82,3 +82,5 @@
   .popup-menu { bottom: 48px; max-height: calc(100% - 60px); }
   .popup-toast { bottom: 48px; }
 }
+.menu-select { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; font-size: 13px; }
+.menu-select select { max-width: 60%; border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; background: var(--surface); color: var(--text); font-size: 12px; }

@@ -187,13 +187,18 @@ impl TranslationCache {
             "SELECT id, source_text, translation, source_language, target_language,
                     provider, model, created_at, favorite
              FROM translation_cache
-             WHERE (?1 = '' OR source_text LIKE '%' || ?1 || '%' OR translation LIKE '%' || ?1 || '%')
+             WHERE (?1 = '' OR source_text LIKE '%' || ?1 || '%' ESCAPE '\\'
+                              OR translation LIKE '%' || ?1 || '%' ESCAPE '\\')
                AND (?2 = 0 OR favorite = 1)
              ORDER BY favorite DESC, last_used_at DESC, id DESC
              LIMIT ?3",
         )?;
         let rows = statement.query_map(
-            params![query.trim(), i64::from(favorite_only), limit.clamp(1, 200)],
+            params![
+                escape_like(query.trim()),
+                i64::from(favorite_only),
+                limit.clamp(1, 200)
+            ],
             |row| {
                 Ok(HistoryEntry {
                     id: row.get(0)?,
@@ -249,6 +254,18 @@ impl TranslationCache {
             })?,
         )
     }
+}
+
+/// Makes user text literal inside a `LIKE ... ESCAPE '\'` pattern.
+fn escape_like(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        if matches!(character, '\\' | '%' | '_') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
 }
 
 fn ensure_column(connection: &Connection, name: &str, definition: &str) -> Result<(), AppError> {
@@ -360,6 +377,34 @@ mod tests {
 
         assert_eq!(cache.len().unwrap(), 2);
         assert!(cache.get("first").unwrap().is_none());
+    }
+
+    #[test]
+    fn history_search_treats_wildcard_characters_literally() {
+        let cache = TranslationCache::in_memory().unwrap();
+        let mut percent = result();
+        percent.source_text = "100% sure".into();
+        cache.put("percent", &percent).unwrap();
+        let mut snake = result();
+        snake.source_text = "snake_case name".into();
+        cache.put("snake", &snake).unwrap();
+        cache.put("plain", &result()).unwrap();
+
+        let sources = |query: &str| -> Vec<String> {
+            let mut found: Vec<String> = cache
+                .history(query, false, 50)
+                .unwrap()
+                .into_iter()
+                .map(|entry| entry.source_text)
+                .collect();
+            found.sort();
+            found
+        };
+        assert_eq!(sources("%"), ["100% sure"]);
+        assert_eq!(sources("_"), ["snake_case name"]);
+        assert_eq!(sources("e_c"), ["snake_case name"]);
+        assert_eq!(sources("\\"), Vec::<String>::new());
+        assert_eq!(sources("").len(), 3);
     }
 
     #[test]

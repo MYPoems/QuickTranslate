@@ -10,7 +10,7 @@ use crate::{
         UpdateSettings, CURRENT_SETTINGS_SCHEMA,
     },
     errors::AppError,
-    security::provider_api_key,
+    security::key_for_endpoint,
 };
 
 #[derive(Serialize)]
@@ -105,27 +105,31 @@ pub fn save_settings(update: UpdateSettings, app: AppHandle) -> Result<SettingsV
         .is_enabled()
         .map_err(|error| AppError::AutoStart(error.to_string()))?;
 
-    let desired_api_key = if update.clear_api_key {
-        None
-    } else {
-        update
-            .api_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|key| !key.is_empty())
-            .map(str::to_string)
-            .or_else(|| previous_api_key.clone())
-    };
-    let desired_cloud_ocr_api_key = if update.clear_cloud_ocr_api_key {
-        None
-    } else {
-        update
-            .cloud_ocr_api_key
-            .as_deref()
-            .map(str::trim)
-            .filter(|key| !key.is_empty())
-            .map(str::to_string)
-            .or_else(|| previous_cloud_ocr_api_key.clone())
+    // A saved key stays with the service it was saved for; pointing the settings at another
+    // host must not carry it along. Decided before anything is changed.
+    let desired_keys = key_for_endpoint(
+        update.api_key.as_deref(),
+        update.clear_api_key,
+        previous_api_key.as_deref(),
+        &previous.base_url,
+        &candidate.base_url,
+    )
+    .and_then(|api_key| {
+        key_for_endpoint(
+            update.cloud_ocr_api_key.as_deref(),
+            update.clear_cloud_ocr_api_key,
+            previous_cloud_ocr_api_key.as_deref(),
+            &previous.cloud_ocr_base_url,
+            &candidate.cloud_ocr_base_url,
+        )
+        .map(|cloud_ocr_api_key| (api_key, cloud_ocr_api_key))
+    });
+    let (desired_api_key, desired_cloud_ocr_api_key) = match desired_keys {
+        Ok(keys) => keys,
+        Err(error) => {
+            state.record_error(&error);
+            return Err(error);
+        }
     };
 
     let result = (|| -> Result<(), AppError> {
@@ -218,13 +222,19 @@ fn set_auto_start(app: &AppHandle, enabled: bool) -> Result<(), AppError> {
 pub async fn test_provider(update: UpdateSettings, app: AppHandle) -> Result<String, AppError> {
     let state = app.state::<AppState>();
     let settings = SettingsStore::validate(&update)?;
-    let api_key = update
-        .api_key
-        .as_deref()
-        .filter(|key| !key.trim().is_empty())
-        .map(str::to_string)
-        .map(Ok)
-        .unwrap_or_else(|| provider_api_key(&settings, state.secrets.as_ref()))?;
+    // The form may point at a service other than the saved one; test it with the key typed
+    // for it, never with a key that was saved for somewhere else.
+    let api_key = match key_for_endpoint(
+        update.api_key.as_deref(),
+        update.clear_api_key,
+        state.secrets.get_api_key()?.as_deref(),
+        &state.settings.get()?.base_url,
+        &settings.base_url,
+    )? {
+        Some(api_key) => api_key,
+        None if !settings.requires_api_key() => String::new(),
+        None => return Err(AppError::ProviderNotConfigured),
+    };
     state.translation.test_connection(settings, api_key).await?;
     Ok("Connection successful".into())
 }

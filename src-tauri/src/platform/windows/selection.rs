@@ -1,6 +1,9 @@
 use std::{
     mem::size_of,
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Mutex,
+    },
     thread,
     time::{Duration, Instant},
 };
@@ -30,10 +33,47 @@ const CLIPBOARD_ATTEMPTS: u32 = 5;
 /// copy and restore the wrong content.
 static CAPTURE: Mutex<()> = Mutex::new(());
 
+/// How long after a capture its synthetic Ctrl+C may still be working through the
+/// foreground window's event loop.
+const CAPTURE_ECHO: Duration = Duration::from_millis(400);
+static CAPTURE_ACTIVE: AtomicBool = AtomicBool::new(false);
+static CAPTURE_ENDED: Mutex<Option<Instant>> = Mutex::new(None);
+
+struct CaptureActivity;
+
+impl CaptureActivity {
+    fn begin() -> Self {
+        CAPTURE_ACTIVE.store(true, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for CaptureActivity {
+    fn drop(&mut self) {
+        if let Ok(mut ended) = CAPTURE_ENDED.lock() {
+            *ended = Some(Instant::now());
+        }
+        CAPTURE_ACTIVE.store(false, Ordering::SeqCst);
+    }
+}
+
+/// True while a capture's synthetic Ctrl+C may be reaching the foreground window. Our own
+/// popup can be that window; its "Ctrl+C copies the translation" shortcut must not answer a
+/// keystroke the user never pressed, or the capture reads the previous translation back.
+pub fn capture_in_flight() -> bool {
+    CAPTURE_ACTIVE.load(Ordering::SeqCst)
+        || CAPTURE_ENDED
+            .lock()
+            .ok()
+            .and_then(|ended| *ended)
+            .is_some_and(|ended| ended.elapsed() < CAPTURE_ECHO)
+}
+
 pub fn capture_selected_text() -> Result<String, AppError> {
     let _serial = CAPTURE
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _activity = CaptureActivity::begin();
 
     // Must happen first, while the hotkey's modifiers are still physically held.
     mask_held_modifiers()?;

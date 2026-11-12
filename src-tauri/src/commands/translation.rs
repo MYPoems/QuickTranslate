@@ -34,8 +34,8 @@ pub async fn retranslate_text(text: String, app: AppHandle) -> Result<Translatio
 }
 
 #[tauri::command]
-pub async fn copy_translation(text: String) -> Result<(), AppError> {
-    platform::copy_text(text).await
+pub async fn copy_translation(text: String, shortcut: Option<bool>) -> Result<bool, AppError> {
+    platform::copy_text(text, shortcut.unwrap_or(false)).await
 }
 
 #[tauri::command]

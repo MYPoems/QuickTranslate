@@ -4,7 +4,9 @@ use windows::Win32::{
     Foundation::{GlobalFree, HANDLE, HGLOBAL},
     System::{
         DataExchange::{
-            CloseClipboard, EmptyClipboard, GetClipboardData, OpenClipboard, SetClipboardData,
+            CloseClipboard, CountClipboardFormats, EmptyClipboard, GetClipboardData,
+            GetClipboardSequenceNumber, IsClipboardFormatAvailable, OpenClipboard,
+            SetClipboardData,
         },
         Memory::{GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE},
         Ole::CF_UNICODETEXT,
@@ -28,8 +30,42 @@ impl Drop for ClipboardGuard {
     }
 }
 
+/// What the clipboard held before a selection capture, as far as it can be put back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Snapshot {
+    pub text: Option<String>,
+    /// No format at all was present. `false` with `text: None` means non-text content
+    /// (an image, files, ...) that cannot be restored from here.
+    pub is_empty: bool,
+}
+
+/// Changes every time any application modifies the clipboard.
+pub fn sequence_number() -> u32 {
+    unsafe { GetClipboardSequenceNumber() }
+}
+
+/// Whether plain text has been published. Does not open the clipboard, so it can never
+/// collide with an application that is still in the middle of writing to it.
+pub fn has_text() -> bool {
+    unsafe { IsClipboardFormatAvailable(CF_UNICODETEXT.0 as u32) }.is_ok()
+}
+
+pub fn snapshot() -> Result<Snapshot, AppError> {
+    let _guard = ClipboardGuard::open()?;
+    let is_empty = unsafe { CountClipboardFormats() } == 0;
+    Ok(Snapshot {
+        text: read_open_text()?,
+        is_empty,
+    })
+}
+
 pub fn read_text() -> Result<Option<String>, AppError> {
     let _guard = ClipboardGuard::open()?;
+    read_open_text()
+}
+
+/// The caller must hold the clipboard open.
+fn read_open_text() -> Result<Option<String>, AppError> {
     let handle = match unsafe { GetClipboardData(CF_UNICODETEXT.0 as u32) } {
         Ok(handle) => handle,
         Err(_) => return Ok(None),

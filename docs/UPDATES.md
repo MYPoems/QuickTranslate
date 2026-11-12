@@ -16,6 +16,7 @@
 - `settings.pre-v*.json`：存在时保留旧设置 Schema 的原始副本。
 - `popup-window.json`：当前悬浮窗尺寸。
 - `translations.sqlite3`：使用 SQLite Online Backup，包含未 checkpoint 的 WAL 数据；完成后执行 `integrity_check`。
+- `vocabulary.sqlite3`：生词本，同样使用 SQLite Online Backup。
 - `manifest.json`：来源、目标版本和备份时间。
 - `COMPLETE`：仅所有文件落盘成功后生成。没有此标记的备份不能视为完整。
 

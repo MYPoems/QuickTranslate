@@ -6,9 +6,9 @@
 
 - **产品**：面向 Windows 11 x64 的轻量中英文翻译工具，系统托盘常驻。默认 `Alt+Q` 划词翻译，`Alt+W` 框选 OCR；可自定义两组快捷键。应用本地管理设置、历史、词卡和插件，翻译仍取决于配置的模型服务；“本地应用”不意味着默认所有推理都离线。
 - **技术栈**：Tauri 2 + Rust/Tokio、Vanilla TypeScript + Vite + 原生 CSS、SQLite（rusqlite bundled）、Windows WebView2、Windows Credential Manager。保持小、快、事件驱动；不要为小修复引入前端框架、长期轮询、全局键盘钩子或常驻服务。
-- **版本锚点**：写本文前，本地分支 `codex/collector-ui-fix`、远端 `main` 和 `v1.6.2` 标签指向 `e88e2a0cbcd3e3d936ea38ed6fe378abb481ea36`（标签解引用后）；此后本地分支在其上新增了取词修复和本文件的提交，尚未推送。远端是 [MYPoems/QuickTranslate](https://github.com/MYPoems/QuickTranslate)。接手时重新运行 `git status --short --branch`、`git log -5 --oneline`、`git tag --points-at HEAD`；不要假设本地 `main` 同步，也不要覆盖工作区已有改动。
+- **版本锚点**：写本文前，本地分支 `codex/collector-ui-fix`、远端 `main` 和 `v1.6.2` 标签指向 `e88e2a0cbcd3e3d936ea38ed6fe378abb481ea36`（标签解引用后）；此后该分支新增了取词修复、代码审查修复和本文件的提交，已推送并在 PR #1 中等待合并。远端是 [MYPoems/QuickTranslate](https://github.com/MYPoems/QuickTranslate)。接手时重新运行 `git status --short --branch`、`git log -5 --oneline`、`git tag --points-at HEAD`；不要假设本地 `main` 同步，也不要覆盖工作区已有改动。
 - **正式版**：[v1.6.2 Release](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.6.2) 为交接时的最新正式版，非草稿、非预发行。此前已覆盖安装本机版并校验数据保留；本轮只写交接，不代表此刻程序仍在运行，也未重新安装。
-- **优先待办**：Word/Excel 划词显示“未检测到选中文字”，但手工复制正常。根因已确认并在源码修复（2026-11-11，提交 `f14b3a6`，仅在本地分支 `codex/collector-ui-fix`，未推送、未打包、未安装，已安装的 1.6.2 仍有此问题）。待随下一版本构建后在真机验收，见第 6 节。
+- **优先待办**：Word/Excel 划词显示“未检测到选中文字”，但手工复制正常。根因已确认并在源码修复（2026-11-11，提交 `f14b3a6`，在 PR #1 中，未合并、未打包、未安装，已安装的 1.6.2 仍有此问题）。待随下一版本构建后在真机验收，见第 6 节。
 - **操作授权**：分析请求先诊断；明确要求修复才改源码。改源码、构建、替换本机安装、推送、公开 Release 是不同操作，按当前用户授权执行。不要把过去授权当成持续授权。现有用户数据、凭据和未提交改动都要保留。
 
 ## 2. 目录和调用边界

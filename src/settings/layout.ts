@@ -93,7 +93,7 @@ export function organizeSettings(root: HTMLElement, form: HTMLFormElement): void
   move(".preference-card", "general");
   panelMap.get("learning")!.insertAdjacentHTML("beforeend", `<p class="settings-note">首次学习不计复习次数；三次有效复习后，间隔到期再进行小测试。通过后归档至已掌握，不自动永久删除。</p>
     <label>最短复习间隔（小时）<input name="intervalHours" type="number" min="4" max="168" value="4" required disabled></label>
-    <label>每日复习上限（UTC 日）<input name="dailyLimit" type="number" min="1" max="100" value="20" required disabled></label>
+    <label>每日复习上限<input name="dailyLimit" type="number" min="1" max="100" value="20" required disabled></label>
     <p class="settings-note">降低间隔不会提前解锁已有计划；延长间隔会延后尚未到期的计划。</p>
     <p id="learning-status" class="settings-note" role="status">正在读取复习规则…</p>`);
   for (const selector of [".maintenance-card", ".diagnostics-card", ".backup-card"]) {

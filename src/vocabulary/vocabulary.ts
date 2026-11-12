@@ -8,7 +8,10 @@ import "./vocabulary.css";
 
 const root=document.querySelector<HTMLElement>("#app")!;
 let current:VocabularyEntry|undefined;let view:VocabularyView;let mode:"browse"|"review"|"quiz"="browse";
-let revealed=false;let activeQuiz:VocabularyQuizView|undefined;let choice=-1;let offset=0;let busy=false;let loadRevision=0;let dueTimer:number|undefined;
+let revealed=false;let activeQuiz:VocabularyQuizView|undefined;let choice=-1;let busy=false;
+// The word list loads a page at a time as it is scrolled: `pages` is how many are loaded,
+// `moreWords` whether the last one was full.
+const PAGE=100;let pages=1;let moreWords=false;let loadRevision=0;let dueTimer:number|undefined;
 const el=<T extends HTMLElement>(selector:string)=>root.querySelector<T>(selector)!;
 const errorText=(error:unknown)=>error instanceof Error?error.message:String((error as {message?:string})?.message||error);
 const speech=new SpeechControls("vocabulary",(message,error)=>{const node=el("#book-speaking");if(node){node.textContent=message;node.hidden=!message;node.dataset.error=String(!!error);}});
@@ -24,22 +27,35 @@ async function abandon(){stopSpeech();if(activeQuiz){const token=activeQuiz.toke
 export function mountVocabulary(){
   root.innerHTML=`<main class="book-shell"><header class="book-header app-header"><div><p class="eyebrow">QUICKTRANSLATE</p><h1>生词本</h1></div><button id="book-add">＋ 添加生词</button></header>
     <nav class="book-tabs" aria-label="生词筛选"><button data-filter="learning" aria-pressed="true">待学习</button><button data-filter="due">到期复习</button><button data-filter="test">待测试</button><button data-filter="mastered">已掌握</button></nav>
+    <div class="book-today"><span id="book-today"></span><progress id="book-today-bar" max="20" value="0" aria-label="今日复习进度"></progress></div>
     <p id="book-counts"></p><p id="book-status" role="status"></p>
-    <section class="book-workspace"><aside><input id="book-search" type="search" placeholder="搜索英文单词" maxlength="100" aria-label="搜索生词" /><div id="book-list"></div><div class="book-pages"><button id="book-prev">上一页</button><span id="book-page"></span><button id="book-next">下一页</button></div></aside><article id="book-detail" aria-label="词卡"></article></section>
+    <section class="book-workspace"><aside><input id="book-search" type="search" placeholder="搜索英文单词" maxlength="100" aria-label="搜索生词" /><div id="book-list"></div></aside><article id="book-detail" aria-label="词卡"></article></section>
     <p id="book-speaking" role="status" hidden></p>
     <details class="book-maintenance"><summary>复习设置与本地备份</summary><p>首次学习不计次；三次有效复习后再等待同样间隔进行测试。提前查看不计次。掌握后归档，不自动永久删除。</p>
-      <form id="book-rules"><label>最短间隔（小时）<input name="intervalHours" type="number" min="4" max="168" required /></label><label>每日复习上限（UTC 日）<input name="dailyLimit" type="number" min="1" max="100" required /></label><button>保存规则</button></form>
+      <form id="book-rules"><label>最短间隔（小时）<input name="intervalHours" type="number" min="4" max="168" required /></label><label>每日复习上限<input name="dailyLimit" type="number" min="1" max="100" required /></label><button>保存规则</button></form>
       <p>降低间隔不会提前解锁已有计划；延长间隔会延后尚未到期的计划。清理翻译历史不影响生词本。</p>
       <div class="book-tools"><button id="book-export">导出 JSON</button><button id="book-csv">导出阅读用 CSV</button><button id="book-copy">复制备份</button><button id="book-import">确认合并导入…</button><button id="book-save-file">保存为文件</button></div>
       <textarea id="book-backup" rows="5" spellcheck="false" placeholder="JSON 备份包括词卡、来源及复习/测试进度；导入不覆盖同名现有词条。CSV 不用于恢复进度。" aria-label="生词本备份"></textarea><label>载入 JSON 文件<input id="book-backup-file" type="file" accept=".json,application/json" /></label>
     </details><dialog id="book-confirm"><h2>请确认</h2><p id="confirmation-text"></p><div><button id="confirm-no">取消</button><button id="confirm-yes">确认</button></div></dialog></main>`;
-  const sidebar=el(".book-workspace aside");sidebar.prepend(el(".book-tabs"),el("#book-counts"));
+  const sidebar=el(".book-workspace aside");sidebar.prepend(el(".book-tabs"),el(".book-today"),el("#book-counts"));
   let filter="learning";let debounce:number|undefined;
   const collector=mountCollector(root,()=>({source:"",translation:""}));
   el("#book-add").addEventListener("click",()=>void collector.open().catch(e=>status(errorText(e),true)));
-  root.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach(b=>b.addEventListener("click",()=>void run(async()=>{await abandon();filter=b.dataset.filter!;offset=0;current=undefined;root.querySelectorAll('[data-filter]').forEach(n=>n.setAttribute("aria-pressed",String(n===b)));await loadBook();})));
-  el<HTMLInputElement>("#book-search").addEventListener("input",()=>{window.clearTimeout(debounce);debounce=window.setTimeout(()=>{offset=0;void loadBook();},180);});
-  el("#book-prev").addEventListener("click",()=>{offset=Math.max(0,offset-100);void loadBook();});el("#book-next").addEventListener("click",()=>{offset+=100;void loadBook();});
+  root.querySelectorAll<HTMLButtonElement>('[data-filter]').forEach(b=>b.addEventListener("click",()=>void run(async()=>{await abandon();filter=b.dataset.filter!;pages=1;current=undefined;root.querySelectorAll('[data-filter]').forEach(n=>n.setAttribute("aria-pressed",String(n===b)));await loadBook();})));
+  el<HTMLInputElement>("#book-search").addEventListener("input",()=>{window.clearTimeout(debounce);debounce=window.setTimeout(()=>{pages=1;void loadBook();},180);});
+  const wordList=el("#book-list");
+  wordList.addEventListener("scroll",()=>{if(moreWords&&!busy&&wordList.scrollTop+wordList.clientHeight>=wordList.scrollHeight-80){moreWords=false;pages++;void loadBook();}});
+  // Reviewing without the mouse: Space or Enter turns the card or starts, 1 / 2 / 3 rate it.
+  document.addEventListener("keydown",event=>{
+    if(event.ctrlKey||event.altKey||event.metaKey||busy||mode==="quiz"||root.querySelector("dialog[open]"))return;
+    const target=event.target instanceof HTMLElement?event.target:undefined;
+    if(target?.closest('input, textarea, select, button, summary, [contenteditable="true"]'))return;
+    const press=(id:string)=>{const node=root.querySelector<HTMLButtonElement>(`#${id}`);if(!node||node.disabled)return false;event.preventDefault();node.click();return true;};
+    if(event.key===" "||event.key==="Enter"){if(!press("reveal-card")&&!press("start-review"))press("finish-study");}
+    else if(event.key==="1")press("rate-remember");
+    else if(event.key==="2")press("rate-fuzzy");
+    else if(event.key==="3")press("rate-forgot");
+  });
   el<HTMLFormElement>("#book-rules").addEventListener("submit",e=>{e.preventDefault();void run(async()=>{const data=new FormData(el<HTMLFormElement>("#book-rules"));await invoke("set_vocabulary_rules",{rules:{intervalHours:Number(data.get("intervalHours")),dailyLimit:Number(data.get("dailyLimit"))}});status("规则已保存，不会提前解锁已有词条");});});
   el("#book-export").addEventListener("click",()=>void run(async()=>{el<HTMLTextAreaElement>("#book-backup").value=await invoke<string>("export_vocabulary");status("JSON 备份已生成，含复习进度，不含 API Key");}));
   el("#book-copy").addEventListener("click",()=>void run(async()=>{const value=el<HTMLTextAreaElement>("#book-backup").value;if(!value.trim())throw new Error("请先导出备份");await invoke("copy_translation",{text:value});status("备份已复制");}));
@@ -55,13 +71,17 @@ export function mountVocabulary(){
 }
 async function loadBook(){
   const request=++loadRevision;try{const filter=root.querySelector<HTMLButtonElement>('[data-filter][aria-pressed="true"]')?.dataset.filter||"learning";
-    const next=await invoke<VocabularyView>("list_vocabulary",{query:el<HTMLInputElement>("#book-search").value,filter,offset});if(request!==loadRevision)return;view=next;
+    // Reload as many pages as were on screen, so a refresh does not throw the list back to its start.
+    const search=el<HTMLInputElement>("#book-search").value;let next:VocabularyView|undefined;const loaded:VocabularyEntry[]=[];let full=false;
+    for(let page=0;page<pages;page++){const part=await invoke<VocabularyView>("list_vocabulary",{query:search,filter,offset:page*PAGE});if(request!==loadRevision)return;next??=part;loaded.push(...(part?.entries??[]));full=(part?.entries?.length??0)>=PAGE;if(!full){pages=page+1;break;}}
+    if(!next)return;view={...next,entries:loaded};moreWords=full;
+    el("#book-today").textContent=`今日已复习 ${view.reviewedToday??0} / ${view.rules.dailyLimit}`;el<HTMLProgressElement>("#book-today-bar").max=view.rules.dailyLimit;el<HTMLProgressElement>("#book-today-bar").value=Math.min(view.reviewedToday??0,view.rules.dailyLimit);
     el("#book-counts").textContent=`${view.total} 词 · ${view.due} 词到期 · ${view.tests} 词待测试 · ${view.mastered} 词已掌握`;
     el<HTMLInputElement>('[name="intervalHours"]').value=String(view.rules.intervalHours);el<HTMLInputElement>('[name="dailyLimit"]').value=String(view.rules.dailyLimit);
     const list=el("#book-list");list.replaceChildren();
     for(const e of view.entries){const row=button(e.word,()=>void run(async()=>{await abandon();current=await invoke<VocabularyEntry>("get_vocabulary_entry",{id:e.id});renderDetail();}));row.className="book-word";row.dataset.selected=String(current?.id===e.id);row.append(text("small",`${({new:"首次学习",review:"待复习",test:"待测试",mastered:"已掌握"})[e.status]} · ${e.reviews}/3`));list.append(row);}
     if(!view.entries.length)list.append(text("p","此筛选暂无词条。可从翻译悬浮窗收藏，或点击添加生词。","book-empty"));
-    el<HTMLButtonElement>("#book-prev").disabled=offset===0;el<HTMLButtonElement>("#book-next").disabled=view.entries.length<100;el("#book-page").textContent=`第 ${Math.floor(offset/100)+1} 页`;
+    if(moreWords)list.append(text("p","向下滚动加载更多…","book-empty"));
     if(!current && view.entries.length){current=view.entries[0];renderDetail();}
     else if(current && mode!=="quiz"){try{const latest=await invoke<VocabularyEntry>("get_vocabulary_entry",{id:current.id});if(request!==loadRevision)return;if(latest.revision!==current.revision){current=latest;revealed=false;mode="browse";renderDetail();}}catch{current=undefined;renderDetail();}}
     else if(!current)renderDetail();
@@ -74,7 +94,7 @@ function renderDetail(){
   if(e.generationError)detail.append(text("p",e.generationError,"book-error"));
   if(!e.card){detail.append(text("p",e.generationState==="generating"?"模型正在生成词卡…": "词条已保存，尚未生成词卡。只发送本词和必要来源句，使用当前翻译模型，可能产生费用。"));const gen=button("生成词卡",()=>void generate(false,false),"generate-card");gen.disabled=e.generationState==="generating";detail.append(gen,button("删除未学习词条…",()=>void run(async()=>{if(!await confirmAction("永久删除这个未学习词条及来源句？"))return;await invoke("delete_vocabulary",{id:e.id,revision:e.revision,confirmed:true});current=undefined;status("词条已删除");}),"delete-pending"));return;}
   const card=e.card;
-  if(mode==="review" && !revealed){detail.append(text("h3","先回忆中文释义，再翻面核对。"),button("查看答案",()=>{revealed=true;renderDetail();},"reveal-card"));return;}
+  if(mode==="review" && !revealed){detail.append(text("h3","先回忆中文释义，再翻面核对。"),button("查看答案",()=>{revealed=true;renderDetail();},"reveal-card"),text("p","键盘：空格或回车翻面","book-keys"));return;}
   detail.append(text("p",`英 ${card.ipaUk||"未提供"} · 美 ${card.ipaUs||"未提供"} · ${card.partOfSpeech}`,"book-ipa"));
   if(card.lemma!==e.word)detail.append(button(`基本词形：${card.lemma} · 确认采用并去重…`,()=>void run(async()=>{if(!await confirmAction("请根据语境确认基本词形。相同基本词会合并来源并保留目标词进度；无目标词时重新生成词卡并从首次学习开始。"))return;current=await invoke("adopt_vocabulary_lemma",{id:e.id,revision:e.revision});renderDetail();}),"adopt-lemma"));
   detail.append(text("h3","当前语境"),text("p",card.contextMeaning,"book-meaning"));const definitions=text("ul","");card.definitions.forEach(d=>definitions.append(text("li",d)));detail.append(definitions);
@@ -83,7 +103,7 @@ function renderDetail(){
   if(card.collocations.length)detail.append(text("p",`常用搭配：${card.collocations.join(" · ")}`));
   detail.append(text("p",`${e.userEdited?"已手动编辑":"AI 生成，请核对音标、释义和题目"} · ${e.provider} ${e.model}`,"book-meta"));
   const learning=text("div","","book-learning-actions");
-  if(mode==="review"&&revealed){for(const [label,rating] of [["记得 · 计一次","remember"],["模糊 · 不增加","fuzzy"],["忘记 · 退一步","forgot"]])learning.append(button(label,()=>void review(rating),`rate-${rating}`));}
+  if(mode==="review"&&revealed){for(const [label,rating] of [["记得 · 计一次","remember"],["模糊 · 不增加","fuzzy"],["忘记 · 退一步","forgot"]])learning.append(button(label,()=>void review(rating),`rate-${rating}`));learning.append(text("p","键盘：1 记得 · 2 模糊 · 3 忘记","book-keys"));}
   else if(e.status==="new")learning.append(button("完成首次学习（不计复习）",()=>void review("study"),"finish-study"));
   else if(e.status==="review"){const start=button("开始到期复习",()=>{mode="review";revealed=false;renderDetail();},"start-review");start.disabled=(e.nextDueAt||Infinity)>Date.now()/1000;learning.append(start);}
   else if(e.status==="test"){const start=button("开始两题测试",()=>void run(async()=>{stopSpeech();activeQuiz=await invoke("begin_vocabulary_quiz",{id:e.id,revision:e.revision});mode="quiz";root.dataset.quiz="true";renderQuiz(false);}),"start-quiz");start.disabled=(e.nextDueAt||Infinity)>Date.now()/1000;learning.append(start);}
@@ -94,7 +114,20 @@ function renderDetail(){
 function readingLine(content:HTMLElement,label:string,value:string){const line=text("div","","book-reading-line");line.append(content,speech.button(label,value));return line;}
 function highlight(value:string,word:string){const p=document.createElement("p");const escaped=word.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");const regex=new RegExp(`(\\b${escaped}\\b)`,"gi");for(const part of value.split(regex)){p.append(part.toLowerCase()===word.toLowerCase()?text("mark",part):document.createTextNode(part));}return p;}
 async function reviewAction(rating:string){if(!current)return;stopSpeech();current=await invoke("review_vocabulary",{id:current.id,revision:current.revision,token:crypto.randomUUID(),rating});mode="browse";revealed=false;renderDetail();status(rating==="study"?"首次学习完成；到期后才能计入第一次复习":"学习进度已保存");}
-async function review(rating:string){await run(()=>reviewAction(rating));}
+// After a rating given while reviewing, moves straight on to the next word that is due, so
+// a session can be worked through without going back to the list.
+async function review(rating:string){
+  await run(async()=>{
+    const reviewing=mode==="review";const done=current?.id;
+    await reviewAction(rating);
+    if(!reviewing)return;
+    const now=Date.now()/1000;
+    const next=view?.entries.find(e=>e.id!==done&&e.status==="review"&&!!e.card&&(e.nextDueAt||Infinity)<=now);
+    if(!next)return;
+    current=await invoke<VocabularyEntry>("get_vocabulary_entry",{id:next.id});mode="review";revealed=false;renderDetail();
+    status("已保存，继续下一个到期的词");
+  });
+}
 async function generate(force:boolean,quizOnly:boolean){await run(async()=>{if(!current)return;const e=current;if(force && !await confirmAction(quizOnly?"重新生成两组测试题？保留复习进度，不上传整个生词本，可能产生费用。":"重新生成词卡可能产生费用，手动编辑将被替换。已有复习次数时须先重新学习。"))return;status("正在生成，请稍候…");current=await invoke("generate_vocabulary",{id:e.id,revision:e.revision,force,quizOnly});renderDetail();status(current?.generationError||"词卡已保存",!!current?.generationError);});}
 function editCard(){
   if(!current?.card)return;const e=current;const original=e.card!;stopSpeech();const detail=el("#book-detail");

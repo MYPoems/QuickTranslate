@@ -1,5 +1,72 @@
 use super::*;
 const T: i64 = 1_780_000_000;
+
+#[test]
+fn the_review_day_starts_at_local_midnight() {
+    const HOUR: i64 = 3_600;
+    // 2026-06-01 00:00:00 UTC.
+    let midnight_utc = 1_780_272_000;
+    assert_eq!(midnight_utc % 86_400, 0);
+    assert_eq!(
+        local_day(midnight_utc, 0),
+        (midnight_utc, midnight_utc + 86_400)
+    );
+    assert_eq!(local_day(midnight_utc + 86_399, 0).0, midnight_utc);
+
+    // UTC+8: the local day began at 16:00 UTC the day before, not at 00:00 UTC.
+    let east = 8 * HOUR;
+    assert_eq!(
+        local_day(midnight_utc + 3 * HOUR, east),
+        (midnight_utc - 8 * HOUR, midnight_utc + 16 * HOUR)
+    );
+    // 17:00 UTC is already 01:00 the next day there.
+    assert_eq!(
+        local_day(midnight_utc + 17 * HOUR, east).0,
+        midnight_utc + 16 * HOUR
+    );
+
+    // UTC-5: 03:00 UTC is still the previous evening.
+    let west = -5 * HOUR;
+    assert_eq!(
+        local_day(midnight_utc + 3 * HOUR, west),
+        (midnight_utc - 19 * HOUR, midnight_utc + 5 * HOUR)
+    );
+    // Before 1970 the day still starts at or before the instant.
+    let (start, end) = local_day(-1, 0);
+    assert!(start <= -1 && -1 < end);
+}
+
+#[test]
+fn the_list_reports_reviews_done_today() {
+    let s = store();
+    let e = study(&s, ready(&s, "architecture"));
+    assert_eq!(
+        s.list("", "all", 0, T).unwrap().reviewed_today,
+        0,
+        "first study does not count"
+    );
+    s.review(
+        e.id,
+        e.revision,
+        "today-review-1",
+        "remember",
+        T + MIN_INTERVAL,
+    )
+    .unwrap();
+    assert_eq!(
+        s.list("", "all", 0, T + MIN_INTERVAL)
+            .unwrap()
+            .reviewed_today,
+        1
+    );
+    assert_eq!(
+        s.list("", "all", 0, T + MIN_INTERVAL + 2 * 86_400)
+            .unwrap()
+            .reviewed_today,
+        0,
+        "another day starts from zero"
+    );
+}
 #[test]
 fn refresh_cannot_reset_inflight_learning_and_repeated_restore_keeps_tokens_bounded() {
     let s = store();

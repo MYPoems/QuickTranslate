@@ -34,7 +34,7 @@ export interface VocabularyEntry {
   model:string;provider:string;generatedAt:number|null;userEdited:boolean;activeQuiz:string|null;quizAttempts:number;
 }
 export interface VocabularyRules { intervalHours:number;dailyLimit:number }
-export interface VocabularyView { entries:VocabularyEntry[];total:number;due:number;tests:number;mastered:number;now:number;rules:VocabularyRules }
+export interface VocabularyView { entries:VocabularyEntry[];total:number;due:number;tests:number;mastered:number;reviewedToday?:number;now:number;rules:VocabularyRules }
 export interface VocabularyQuizView { token:string;entryId:number;meaningPrompt:string;options:string[];cloze:string;hint:string }
 export interface VocabularyQuizResult { passed:boolean;meaningCorrect:boolean;spellingCorrect:boolean;entry:VocabularyEntry }
 

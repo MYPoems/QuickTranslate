@@ -49,6 +49,32 @@ pub fn last_capture_diagnostics() -> Option<CaptureDiagnostics> {
     None
 }
 
+/// How far local time is ahead of UTC, in seconds, including daylight saving. Used where
+/// "today" has to mean the user's day rather than the UTC one.
+pub fn local_utc_offset_seconds() -> i64 {
+    #[cfg(windows)]
+    {
+        use ::windows::Win32::System::Time::{GetTimeZoneInformation, TIME_ZONE_INFORMATION};
+        const DAYLIGHT: u32 = 2;
+        const INVALID: u32 = u32::MAX;
+        let mut zone = TIME_ZONE_INFORMATION::default();
+        let state = unsafe { GetTimeZoneInformation(&mut zone) };
+        if state == INVALID {
+            return 0;
+        }
+        // Windows gives the bias as minutes to add to local time to get UTC.
+        let bias = zone.Bias
+            + if state == DAYLIGHT {
+                zone.DaylightBias
+            } else {
+                zone.StandardBias
+            };
+        -i64::from(bias) * 60
+    }
+    #[cfg(not(windows))]
+    0
+}
+
 pub async fn get_selected_text() -> Result<String, AppError> {
     #[cfg(windows)]
     {

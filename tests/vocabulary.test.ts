@@ -74,6 +74,40 @@ test("empty collector selection stays open with a readable error and no hidden m
 test("review requires revealing answers and early reviews stay disabled",async()=>{
   const m=await mount("vocabulary",entry({status:"review",reviews:1,nextDueAt:1}));try{m.el("#start-review").click();assert.doesNotMatch(m.el("#book-detail").textContent||"",/建筑学/);assert.equal(m.el("#rate-remember"),null);m.el("#reveal-card").click();assert.match(m.el("#book-detail").textContent||"",/建筑学/);m.el("#rate-remember").click();await settle();assert.equal(m.calls.find(c=>c.command==="review_vocabulary")?.args.rating,"remember");assert.equal(m.el<HTMLButtonElement>("#start-review").disabled,true);}finally{m.close();}
 });
+test("a review session runs from the keyboard and moves on to the next due word", async () => {
+  const due = (id: number, word: string) => entry({ id, word, status: "review", reviews: 1, nextDueAt: 1 });
+  const m = await mount("vocabulary", due(1, "architecture"));
+  try {
+    const original = m.qa.invoke;
+    const words = [due(1, "architecture"), due(2, "resilient")];
+    m.qa.invoke = async (command: string, args: Record<string, unknown> = {}) => {
+      if (command === "list_vocabulary") { m.calls.push({ command, args }); return { entries: words, total: 2, due: 2, tests: 0, mastered: 0, reviewedToday: 3, now: Math.floor(Date.now() / 1000), rules: { intervalHours: 4, dailyLimit: 20 } }; }
+      if (command === "get_vocabulary_entry") return words.find(word => word.id === args.id);
+      if (command === "review_vocabulary") { m.calls.push({ command, args }); words[0] = { ...words[0], reviews: 2, revision: 2, nextDueAt: Math.floor(Date.now() / 1000) + 14400 }; return words[0]; }
+      return original(command, args);
+    };
+    m.handlers.get("vocabulary-changed")!({ payload: null }); await settle();
+    assert.equal(m.el("#book-today").textContent, "今日已复习 3 / 20");
+    assert.equal(m.el<HTMLProgressElement>("#book-today-bar").value, 3);
+    assert.equal(m.el("#book-prev"), null, "the list scrolls instead of paging");
+
+    const key = (name: string, target: EventTarget = m.dom.window.document) => target.dispatchEvent(new m.dom.window.KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true }));
+    key(" ");
+    assert.ok(m.el("#reveal-card"), "Space starts the review");
+    key("1"); await settle();
+    assert.equal(m.calls.some(call => call.command === "review_vocabulary"), false, "a rating needs the answer shown first");
+    key("Enter");
+    assert.match(m.el("#book-detail").textContent || "", /建筑学/);
+    assert.match(m.el(".book-keys").textContent || "", /1 记得/);
+    key("2", m.el<HTMLInputElement>("#book-search"));
+    assert.equal(m.calls.some(call => call.command === "review_vocabulary"), false, "typing in the search box rates nothing");
+    key("1"); await settle();
+    assert.equal(m.calls.find(call => call.command === "review_vocabulary")?.args.rating, "remember");
+    assert.equal(m.el(".book-headword").textContent, "resilient", "straight on to the next due word");
+    assert.ok(m.el("#reveal-card"), "which starts unrevealed");
+  } finally { m.close(); }
+});
+
 test("quiz hides recognition before spelling, sends both answers, and archives on pass",async()=>{
   const m=await mount("vocabulary",entry({status:"test",reviews:3,nextDueAt:1}));try{m.el("#start-quiz").click();await settle();assert.match(m.el("#book-detail").textContent||"",/architecture/);m.el("#quiz-option-0").click();assert.doesNotMatch(m.el("#book-detail").textContent||"",/architecture/);assert.equal(m.el("#quiz-option-0"),null);m.el<HTMLInputElement>("#quiz-spelling").value="architecture";m.el<HTMLFormElement>("#book-detail form").dispatchEvent(new m.dom.window.Event("submit",{cancelable:true}));await settle();assert.deepEqual(m.calls.find(c=>c.command==="submit_vocabulary_quiz")?.args,{token:"fixture-quiz",choice:0,spelling:"architecture"});assert.match(m.el("#book-status").textContent||"",/已归档/);assert.equal(m.root.dataset.quiz,"false");}finally{m.close();}
 });

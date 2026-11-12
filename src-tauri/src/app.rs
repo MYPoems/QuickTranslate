@@ -310,6 +310,7 @@ async fn translate_request(
             settings,
             api_key,
             true,
+            None,
             delta_emitter(&app, request_id, None),
         ))
         .await

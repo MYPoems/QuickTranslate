@@ -428,11 +428,7 @@ mod tests {
     use super::*;
 
     fn request(text: &str) -> TranslationRequest {
-        TranslationRequest {
-            text: text.into(),
-            source_language: Language::English,
-            target_language: Language::Chinese,
-        }
+        TranslationRequest::new(text, Language::English, Language::Chinese)
     }
 
     #[test]

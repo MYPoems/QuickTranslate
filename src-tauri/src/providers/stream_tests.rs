@@ -76,11 +76,11 @@ fn provider(base_url: String) -> OpenAiCompatibleProvider {
 }
 
 fn sentence() -> TranslationRequest {
-    TranslationRequest {
-        text: "Stay curious. Keep learning.".into(),
-        source_language: Language::English,
-        target_language: Language::Chinese,
-    }
+    TranslationRequest::new(
+        "Stay curious. Keep learning.",
+        Language::English,
+        Language::Chinese,
+    )
 }
 
 fn event(content: &str) -> Vec<u8> {
@@ -209,11 +209,7 @@ async fn a_single_word_is_looked_up_whole() {
     let (address, server) = serve(vec![json_reply("200 OK", reply)]);
     let result = provider(address)
         .translate_stream(
-            TranslationRequest {
-                text: "architecture".into(),
-                source_language: Language::English,
-                target_language: Language::Chinese,
-            },
+            TranslationRequest::new("architecture", Language::English, Language::Chinese),
             |_| panic!("dictionary lookups are not streamed"),
         )
         .await

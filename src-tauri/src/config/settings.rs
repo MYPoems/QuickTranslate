@@ -13,6 +13,7 @@ use crate::{
     errors::AppError,
     security::{get_key, SecretKind, SecretStore},
     speech::SpeechPreferences,
+    translation::preferences::TranslationPreferences,
 };
 
 pub const CURRENT_SETTINGS_SCHEMA: u32 = 5;
@@ -88,6 +89,9 @@ pub struct AppSettings {
     pub cloud_ocr_base_url: String,
     pub cloud_ocr_model: String,
     pub speech: SpeechPreferences,
+    /// Languages, glossary and extra requirements. Absent from files written by earlier
+    /// versions, which load with the defaults.
+    pub translation: TranslationPreferences,
 }
 
 impl Default for AppSettings {
@@ -105,6 +109,7 @@ impl Default for AppSettings {
             cloud_ocr_base_url: "https://dashscope.aliyuncs.com/compatible-mode/v1".into(),
             cloud_ocr_model: "qwen3.5-ocr".into(),
             speech: SpeechPreferences::default(),
+            translation: TranslationPreferences::default(),
         }
     }
 }
@@ -127,6 +132,7 @@ fn legacy_ocr_engine() -> OcrEngineKind {
 pub struct SettingsView {
     pub appearance: AppearancePreferences,
     pub speech: SpeechPreferences,
+    pub translation: TranslationPreferences,
     pub provider: String,
     pub base_url: String,
     pub model: String,
@@ -150,6 +156,8 @@ pub struct UpdateSettings {
     pub appearance: AppearancePreferences,
     #[serde(default)]
     pub speech: SpeechPreferences,
+    #[serde(default)]
+    pub translation: TranslationPreferences,
     pub provider: String,
     pub base_url: String,
     pub model: String,
@@ -223,6 +231,7 @@ impl SettingsStore {
         Ok(SettingsView {
             appearance: settings.appearance,
             speech: settings.speech,
+            translation: settings.translation,
             provider: settings.provider,
             base_url: settings.base_url,
             model: settings.model,
@@ -288,6 +297,7 @@ impl SettingsStore {
         Ok(AppSettings {
             appearance: update.appearance.clone(),
             speech: update.speech.clone(),
+            translation: update.translation.validated()?,
             schema_version: CURRENT_SETTINGS_SCHEMA,
             provider,
             base_url: validate_base_url("baseUrl", &update.base_url)?,
@@ -677,6 +687,7 @@ mod tests {
         UpdateSettings {
             appearance: AppearancePreferences::default(),
             speech: SpeechPreferences::default(),
+            translation: TranslationPreferences::default(),
             provider: "OpenAI Compatible".into(),
             base_url: base_url.into(),
             model: "test-model".into(),

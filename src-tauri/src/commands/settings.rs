@@ -423,6 +423,7 @@ pub fn export_settings_backup(app: AppHandle) -> Result<String, AppError> {
     let backup = SettingsBackup {
         appearance: settings.appearance,
         speech: settings.speech,
+        translation: settings.translation,
         schema_version: CURRENT_SETTINGS_SCHEMA,
         provider: settings.provider,
         base_url: settings.base_url,

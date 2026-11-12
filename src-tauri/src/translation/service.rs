@@ -10,7 +10,7 @@ use crate::{
 use super::{
     language::detect_language,
     normalize::normalize_text,
-    types::{TranslationRequest, TranslationResult},
+    types::{Language, TranslationRequest, TranslationResult},
 };
 
 pub struct TranslationService {
@@ -56,9 +56,10 @@ impl TranslationService {
         settings: AppSettings,
         api_key: String,
         use_cache: bool,
+        target: Option<Language>,
         on_text: impl FnMut(&str) + Send,
     ) -> Result<TranslationResult, AppError> {
-        self.translate_with(text, settings, api_key, use_cache, Some(on_text))
+        self.translate_with(text, settings, api_key, use_cache, target, Some(on_text))
             .await
     }
 
@@ -69,7 +70,7 @@ impl TranslationService {
         api_key: String,
         use_cache: bool,
     ) -> Result<TranslationResult, AppError> {
-        self.translate_with(text, settings, api_key, use_cache, None::<fn(&str)>)
+        self.translate_with(text, settings, api_key, use_cache, None, None::<fn(&str)>)
             .await
     }
 
@@ -79,11 +80,13 @@ impl TranslationService {
         settings: AppSettings,
         api_key: String,
         use_cache: bool,
+        target: Option<Language>,
         on_text: Option<impl FnMut(&str) + Send>,
     ) -> Result<TranslationResult, AppError> {
         let text = normalize_text(&text)?;
         let source_language = detect_language(&text);
-        let target_language = source_language.target();
+        let target_language = settings.translation.target_for(source_language, target);
+        let glossary = settings.translation.glossary_for(&text);
         let key = crate::storage::cache_key(
             &text,
             source_language,
@@ -91,6 +94,7 @@ impl TranslationService {
             &settings.provider,
             &settings.model,
             &settings.base_url,
+            &settings.translation.cache_context(&glossary),
         );
 
         if use_cache {
@@ -116,6 +120,8 @@ impl TranslationService {
             text,
             source_language,
             target_language,
+            glossary,
+            instructions: settings.translation.instructions,
         };
         // Only a finished translation is cached; a stream that fails half-way leaves nothing.
         let result = match on_text {
@@ -147,11 +153,11 @@ impl TranslationService {
             },
         );
         provider
-            .translate(TranslationRequest {
-                text: "hello".into(),
-                source_language: super::types::Language::English,
-                target_language: super::types::Language::Chinese,
-            })
+            .translate(TranslationRequest::new(
+                "hello",
+                Language::English,
+                Language::Chinese,
+            ))
             .await?;
         Ok(())
     }

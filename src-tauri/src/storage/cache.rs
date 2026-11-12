@@ -298,6 +298,8 @@ fn prune_to_limit(connection: &Connection, limit: i64) -> Result<(), AppError> {
 
 /// `endpoint` is the service address the result came from. Two services can share a
 /// provider label and a model name; their results must not answer for each other.
+/// `context` stands for whatever else shaped the wording: the glossary terms that applied
+/// and the user's extra requirements.
 pub fn cache_key(
     normalized_text: &str,
     source: Language,
@@ -305,6 +307,7 @@ pub fn cache_key(
     provider: &str,
     model: &str,
     endpoint: &str,
+    context: &str,
 ) -> String {
     let mut hasher = Sha256::new();
     for part in [
@@ -314,6 +317,7 @@ pub fn cache_key(
         provider,
         model,
         endpoint,
+        context,
     ] {
         hasher.update((part.len() as u64).to_le_bytes());
         hasher.update(part.as_bytes());
@@ -351,8 +355,19 @@ mod tests {
                 "p",
                 model,
                 endpoint,
+                "",
             )
         };
+        let other_terms = cache_key(
+            "hello",
+            Language::English,
+            Language::Chinese,
+            "p",
+            "m",
+            "https://a.example/v1",
+            "formal tone",
+        );
+        assert_ne!(key("m", "https://a.example/v1"), other_terms);
         assert_eq!(
             key("m", "https://a.example/v1"),
             key("m", "https://a.example/v1")

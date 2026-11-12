@@ -31,3 +31,4 @@ artifacts/
 # Signing secrets must always stay outside source control
 *.key
 release-keys/
+tools/selection-harness/target/

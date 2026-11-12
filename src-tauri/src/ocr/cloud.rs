@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use crate::{config::AppSettings, errors::AppError};
 
 const MAX_CLOUD_IMAGE_BYTES: usize = 7_000_000;
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
 const OCR_PROMPT: &str =
     "请准确提取图片中的全部原始文字，保持阅读顺序、换行、大小写和标点。只输出识别文字，不要解释，不要翻译，不要使用代码块。";
 
@@ -64,13 +65,30 @@ pub async fn recognize(
     let mut attempt = 0;
     loop {
         attempt += 1;
-        let response = client
+        // The shared client's 30 s budget suits text requests; an image upload of several
+        // megabytes plus recognition needs its own.
+        let response = match client
             .post(&endpoint)
+            .timeout(REQUEST_TIMEOUT)
             .bearer_auth(api_key)
             .json(&body)
             .send()
             .await
-            .map_err(|error| AppError::Network(error.to_string()))?;
+        {
+            Ok(response) => response,
+            // Nothing was sent yet, so trying once more costs nothing.
+            Err(error) if error.is_connect() && attempt < 2 => {
+                tokio::time::sleep(Duration::from_millis(650)).await;
+                continue;
+            }
+            Err(error) if error.is_timeout() => {
+                return Err(AppError::Ocr(format!(
+                    "云端识别超时（{} 秒）。区域较大或网络较慢时，请缩小框选范围后重试",
+                    REQUEST_TIMEOUT.as_secs()
+                )));
+            }
+            Err(error) => return Err(AppError::Network(error.to_string())),
+        };
         let status = response.status();
         if (status.as_u16() == 429 || status.is_server_error()) && attempt < 2 {
             tokio::time::sleep(Duration::from_millis(650)).await;

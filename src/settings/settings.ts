@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { defaultSpeech } from "../speech/reader";
 import { organizeSettings, loadAppearance, appearanceFromForm, selectSettingsPanel, loadLearningRules, learningRulesFromForm, invalidLearningField } from "./layout";
 import { attachShortcutRecorder } from "./shortcut";
+import { formatCapture } from "./diagnostics";
+import { mountOnboarding } from "./onboarding";
 import type {
   AppError,
   DiagnosticsView,
@@ -266,6 +268,14 @@ export function mountSettings(): void {
     savedRules = await loadLearningRules(form);
     cleanState.set("learning", panelStates(form).get("learning") ?? "");
     refreshDirty(form);
+    await mountOnboarding(root, {
+      providers: Object.keys(providerPresets),
+      isLocal: provider => isLocalBaseUrl(providerPresets[provider]?.baseUrl || ""),
+      chooseProvider: provider => { setInput(form, "provider", provider); applyProviderPreset(form); refreshDirty(form); },
+      enterKey: key => { setInput(form, "apiKey", key); refreshDirty(form); },
+      formValue: () => formValue(form),
+      save: () => save(form),
+    });
   });
 }
 
@@ -371,7 +381,8 @@ async function loadKeyStatus(form: HTMLFormElement): Promise<void> {
   } catch { /* The status line keeps what it showed; saving reports real problems. */ }
 }
 
-async function save(form: HTMLFormElement): Promise<void> {
+/** Saves the form; resolves to whether everything was saved. */
+async function save(form: HTMLFormElement): Promise<boolean> {
   const rules = learningRulesFromForm(form);
   const rulesChanged = !!rules && (rules.intervalHours !== savedRules?.intervalHours || rules.dailyLimit !== savedRules?.dailyLimit);
   setBusy(true);
@@ -398,8 +409,10 @@ async function save(form: HTMLFormElement): Promise<void> {
     refreshOcrPanels(form);
     markClean(form);
     setStatus("设置已保存，快捷键和开机启动立即生效", "success");
+    return true;
   } catch (error) {
     reportError(form, error);
+    return false;
   } finally {
     setBusy(false);
   }
@@ -542,6 +555,7 @@ function formatDiagnostics(value: DiagnosticsView): string {
     `Cache: ${value.cachePath}`,
   ];
   if (value.lastError) lines.push(`Last error: ${value.lastError.code} - ${value.lastError.message}`);
+  lines.push("", ...formatCapture(value.lastCapture));
   return lines.join("\n");
 }
 

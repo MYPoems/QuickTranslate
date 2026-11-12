@@ -30,6 +30,7 @@ pub struct DiagnosticsView {
     settings_path: String,
     cache_path: String,
     last_error: Option<DiagnosticError>,
+    last_capture: Option<crate::platform::CaptureDiagnostics>,
 }
 
 /// The two global shortcuts, for windows that mention them in their own text.
@@ -281,6 +282,57 @@ pub fn check_shortcut(shortcut: String, app: AppHandle) -> &'static str {
     }
 }
 
+/// The first-run guide is offered while nothing is set up: no key for the configured
+/// service, which needs one, and the guide neither finished nor skipped before.
+pub fn needs_onboarding(app: &AppHandle) -> bool {
+    #[cfg(debug_assertions)]
+    if crate::qa::directory().is_some() {
+        return false;
+    }
+    let state = app.state::<AppState>();
+    let Some(marker) = onboarding_marker(&state) else {
+        return false;
+    };
+    if marker.exists() {
+        return false;
+    }
+    let Ok(settings) = state.settings.get() else {
+        return false;
+    };
+    settings.requires_api_key()
+        && matches!(
+            get_key(
+                state.secrets.as_ref(),
+                SecretKind::Translation,
+                &settings.base_url
+            ),
+            Ok(None)
+        )
+}
+
+fn onboarding_marker(state: &AppState) -> Option<std::path::PathBuf> {
+    state
+        .settings
+        .path()
+        .parent()
+        .map(|directory| directory.join("onboarding-complete"))
+}
+
+#[tauri::command]
+pub fn get_onboarding(app: AppHandle) -> bool {
+    needs_onboarding(&app)
+}
+
+/// Records that the guide was finished or skipped, so it is not offered again.
+#[tauri::command]
+pub fn complete_onboarding(app: AppHandle) -> Result<(), AppError> {
+    let state = app.state::<AppState>();
+    let marker = onboarding_marker(&state)
+        .ok_or_else(|| AppError::Settings("settings path has no parent".into()))?;
+    std::fs::write(marker, b"The first-run guide was finished or skipped.\n")
+        .map_err(|error| AppError::Settings(error.to_string()))
+}
+
 /// Opens the page where the default provider issues API keys. The address is fixed here;
 /// nothing a window sends can change where the browser goes.
 #[tauri::command]
@@ -360,6 +412,7 @@ pub async fn get_diagnostics(app: AppHandle) -> Result<DiagnosticsView, AppError
         settings_path: state.settings.path().display().to_string(),
         cache_path: state.cache_path.display().to_string(),
         last_error: state.last_error(),
+        last_capture: crate::platform::last_capture_diagnostics(),
     })
 }
 

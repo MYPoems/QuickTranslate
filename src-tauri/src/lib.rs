@@ -97,6 +97,11 @@ pub fn run() {
             app.global_shortcut()
                 .register(settings.ocr_shortcut.as_str())?;
             tray::setup(app)?;
+            // A new installation has no key yet; without the guide the first shortcut press
+            // would only say so, and the settings are otherwise reachable from the tray alone.
+            if commands::settings::needs_onboarding(app.handle()) {
+                window::show_settings(app.handle());
+            }
             if std::env::args().any(|arg| arg == "--vocabulary") {
                 window::show_vocabulary(app.handle());
             }
@@ -155,6 +160,8 @@ pub fn run() {
             commands::settings::get_key_status,
             commands::settings::check_shortcut,
             commands::settings::open_api_key_page,
+            commands::settings::get_onboarding,
+            commands::settings::complete_onboarding,
             commands::ocr::test_cloud_ocr,
             commands::vocabulary::set_vocabulary_collection_open,
             commands::vocabulary::open_vocabulary,

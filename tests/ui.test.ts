@@ -12,7 +12,7 @@ settings.appearance = { theme: "system", popupOpacity: 96 };
 settings.cloudSpeechApiKeyConfigured = false;
 async function settle() { for (let i = 0; i < 4; i++) await tick(); }
 
-async function mount(entry: "settings" | "popup" | "history") {
+async function mount(entry: "settings" | "popup" | "history", replies: Record<string, unknown> = {}) {
   const dom = new JSDOM('<main id="app"></main>', { url: "http://localhost/" });
   const globals = globalThis as unknown as Record<string, unknown>;
   globals.AudioContext = class { async resume() {} };
@@ -28,6 +28,7 @@ async function mount(entry: "settings" | "popup" | "history") {
     async listen(name: string, handler: (event: { payload: unknown }) => void) { if (!events.has(name)) events.set(name, new Set()); events.get(name)!.add(handler); return () => events.get(name)?.delete(handler); },
     async invoke(command: string, args: Record<string, unknown> = {}): Promise<unknown> {
       calls.push({ command, args });
+      if (command in replies) return replies[command];
       if (command === "get_settings") return settings;
       if (command === "get_appearance_preferences") return { theme: "system", popupOpacity: 96 };
       if (command === "list_translation_history") return [{ id: 1, sourceText: "Stay curious.", translation: "保持好奇。", sourceLanguage: "en", targetLanguage: "zh", provider: "QA", model: "fixture", createdAt: 1, favorite: false }];
@@ -205,6 +206,59 @@ test("a key press becomes a shortcut only when it is a usable combination", asyn
     assert.equal(refused.shortcut, undefined);
     assert.ok(refused.problem);
   }
+});
+
+test("the first-run guide sets up a service through the real form and shows once", async () => {
+  const { element, qa, calls, dom, close } = await mount("settings");
+  try {
+    assert.equal(dom.window.document.querySelector("#onboarding"), null, "no guide when the backend does not ask for one");
+  } finally { close(); }
+
+  const guided = await mount("settings", { get_onboarding: true });
+  try {
+    const { element: find, calls: log, qa: stub } = guided;
+    const original = stub.invoke;
+    stub.invoke = async (command, args = {}) => {
+      if (command === "test_provider" || command === "complete_onboarding") { log.push({ command, args }); return "ok"; }
+      if (command === "translate_text") { log.push({ command, args }); return { sourceText: args.text, translation: "保持好奇，持续学习。", detectedLanguage: "english", targetLanguage: "chinese", provider: "QA", model: "test", cached: false }; }
+      return original(command, args);
+    };
+    assert.equal(find<HTMLDialogElement>("#onboarding").open, true);
+    find<HTMLSelectElement>("#onboarding-provider").value = "DeepSeek";
+    find("#onboarding-next").click();
+    assert.equal(find<HTMLInputElement>('[name="baseUrl"]').value, "https://api.deepseek.com/v1", "the guide fills in the real settings form");
+    assert.equal(find('[data-onboarding-step="2"]').hidden, false);
+
+    find("#onboarding-test").click(); await settle();
+    assert.match(find("#onboarding-status").textContent || "", /请先填写 API Key/);
+    assert.equal(log.some(call => call.command === "test_provider"), false, "nothing is sent without a key");
+
+    find<HTMLInputElement>("#onboarding-key").value = "sk-test"; find("#onboarding-test").click(); await settle();
+    const tested = log.find(call => call.command === "test_provider")!.args.update as { apiKey: string; baseUrl: string };
+    assert.deepEqual([tested.apiKey, tested.baseUrl], ["sk-test", "https://api.deepseek.com/v1"]);
+    assert.equal((log.find(call => call.command === "save_settings")!.args.update as { apiKey: string }).apiKey, "sk-test");
+    assert.equal(find('[data-onboarding-step="3"]').hidden, false);
+    assert.equal(find("#onboarding-shortcut").textContent, "Alt + Q");
+
+    find("#onboarding-try").click(); await settle();
+    assert.equal(find("#onboarding-result").textContent, "保持好奇，持续学习。");
+    find("#onboarding-done").click(); await settle();
+    assert.ok(log.some(call => call.command === "complete_onboarding"));
+    assert.equal(find<HTMLDialogElement>("#onboarding").open, false);
+  } finally { guided.close(); }
+  void element; void qa; void calls;
+});
+
+test("capture diagnostics say which phase a failed lookup stopped at", async () => {
+  const { formatCapture } = await import("../src/settings/diagnostics");
+  const base = { secondsAgo: 3, totalMs: 310, releaseWaitMs: 60, keysReleased: true, clipboardChanged: false, textFound: false, writtenByTarget: false, clipboardRestored: null };
+  assert.match(formatCapture(undefined)[0], /还没有取过词/);
+  assert.match(formatCapture(base)[0], /没有响应复制/);
+  assert.match(formatCapture({ ...base, keysReleased: false, releaseWaitMs: 1000 })[0], /超过 1 秒未松开/);
+  assert.match(formatCapture({ ...base, clipboardChanged: true, writtenByTarget: true })[0], /没有文字/);
+  const success = formatCapture({ ...base, clipboardChanged: true, writtenByTarget: true, textFound: true, clipboardRestored: true });
+  assert.match(success[0], /取到了文字/);
+  assert.match(success.join("\n"), /等待松开快捷键 60 ms[\s\S]*由前台程序写入：是[\s\S]*已恢复/);
 });
 
 test("settings record shortcuts from key presses and warn about clashes as they happen", async () => {

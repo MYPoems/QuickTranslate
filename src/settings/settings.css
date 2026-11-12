@@ -63,3 +63,20 @@ input[type="range"] { width: 100%; accent-color: var(--accent-strong); }
 .appearance-sample p:last-child { margin-bottom: 0; }
 .appearance-sample .sample-label { font-size: 12px; color: var(--muted); }
 @media (max-width: 600px) { .settings-body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }.settings-nav { flex-direction: row; flex-wrap: wrap; gap: 2px; padding: 8px; border-right: 0; border-bottom: 1px solid var(--line); }.settings-nav button { padding: 7px 9px; font-size: 12px; }.settings-panels { padding: 18px; }.settings-footer { padding: 10px 14px; } }
+#onboarding { width: min(520px, calc(100vw - 48px)); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; background: var(--bg); color: var(--text); }
+#onboarding::backdrop { background: rgb(0 0 0 / .35); }
+#onboarding h2 { margin: 0 0 12px; font-size: 18px; font-weight: 500; }
+#onboarding section { display: grid; gap: 12px; }
+#onboarding label { display: grid; gap: 7px; font-size: 13px; }
+#onboarding input, #onboarding select { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 10px 11px; background: var(--surface); color: var(--text); font-size: 14px; }
+#onboarding p { margin: 0; font-size: 13px; line-height: 1.65; }
+#onboarding blockquote { margin: 0; padding: 10px 12px; border-left: 2px solid var(--accent); border-radius: 5px; background: var(--surface); font-size: 14px; }
+#onboarding kbd { padding: 1px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); font: inherit; }
+.onboarding-steps { display: flex; gap: 6px; margin: 0 0 16px; padding: 0; list-style: none; counter-reset: step; font-size: 12px; color: var(--muted); }
+.onboarding-steps li { flex: 1; counter-increment: step; padding-top: 8px; border-top: 2px solid var(--line); }
+.onboarding-steps li::before { content: counter(step) ". "; }
+.onboarding-steps li[aria-current="step"] { border-color: var(--accent-strong); color: var(--text); }
+.onboarding-steps li[data-done="true"] { border-color: var(--accent); }
+.onboarding-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.onboarding-result { min-height: 22px; font-size: 15px !important; }
+.onboarding-result[data-kind="error"] { color: var(--danger); }

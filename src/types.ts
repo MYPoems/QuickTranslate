@@ -114,6 +114,19 @@ export interface DiagnosticsView {
   settingsPath: string;
   cachePath: string;
   lastError?: AppError;
+  lastCapture?: CaptureDiagnostics;
+}
+
+/** What the last selection capture did: timings and yes/no answers, never any content. */
+export interface CaptureDiagnostics {
+  secondsAgo: number;
+  totalMs: number;
+  releaseWaitMs: number;
+  keysReleased: boolean;
+  clipboardChanged: boolean;
+  textFound: boolean;
+  writtenByTarget: boolean;
+  clipboardRestored?: boolean | null;
 }
 
 export interface HistoryEntry {

@@ -171,6 +171,63 @@ async fn recognize_region(
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CloudOcrTest {
+    elapsed_ms: u64,
+    /// Whether the reply contained the text of the built-in test picture.
+    recognized: bool,
+}
+
+/// Checks the cloud OCR settings in the form, saved or not, against the built-in test
+/// picture. Nothing from the screen is uploaded.
+#[tauri::command]
+pub async fn test_cloud_ocr(
+    update: crate::config::UpdateSettings,
+    app: AppHandle,
+) -> Result<CloudOcrTest, AppError> {
+    let settings = crate::config::SettingsStore::validate(&update)?;
+    if settings.cloud_ocr_base_url.is_empty() {
+        return Err(AppError::invalid(
+            "cloudOcrBaseUrl",
+            "请先填写云端 OCR 服务地址",
+        ));
+    }
+    if settings.cloud_ocr_model.is_empty() {
+        return Err(AppError::invalid(
+            "cloudOcrModel",
+            "请先填写云端 OCR 模型名称",
+        ));
+    }
+    let state = app.state::<AppState>();
+    let [_, cloud_ocr, _] = crate::commands::settings::key_changes(&update);
+    let api_key = cloud_ocr
+        .effective(state.secrets.as_ref(), &settings.cloud_ocr_base_url)?
+        .ok_or_else(|| {
+            AppError::invalid(
+                "cloudOcrApiKey",
+                "请填写这个服务地址的云端 OCR API Key 后再测试",
+            )
+        })?;
+    let started = std::time::Instant::now();
+    let recognized = match cloud::recognize(
+        &state.http_client,
+        &settings,
+        &api_key,
+        cloud::CONNECTION_TEST_IMAGE,
+    )
+    .await
+    {
+        Ok(text) => text.to_lowercase().contains(cloud::CONNECTION_TEST_WORD),
+        Err(AppError::OcrNoText) => false,
+        Err(error) => return Err(error),
+    };
+    Ok(CloudOcrTest {
+        elapsed_ms: started.elapsed().as_millis() as u64,
+        recognized,
+    })
+}
+
 #[tauri::command]
 pub fn complete_paddle_ocr(request_id: u64, text: String, app: AppHandle) -> Result<u64, AppError> {
     if text.trim().is_empty() {

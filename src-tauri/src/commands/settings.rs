@@ -76,7 +76,7 @@ pub fn get_settings(app: AppHandle) -> Result<SettingsView, AppError> {
 }
 
 /// What the settings form asked for one kind of key.
-struct KeyChange<'a> {
+pub(crate) struct KeyChange<'a> {
     kind: SecretKind,
     entered: Option<&'a str>,
     clear: bool,
@@ -101,7 +101,7 @@ impl KeyChange<'_> {
     }
 
     /// The key a request to `endpoint` would use if this form were saved.
-    fn effective(
+    pub(crate) fn effective(
         &self,
         secrets: &dyn SecretStore,
         endpoint: &str,
@@ -116,7 +116,7 @@ impl KeyChange<'_> {
     }
 }
 
-fn key_changes(update: &UpdateSettings) -> [KeyChange<'_>; 3] {
+pub(crate) fn key_changes(update: &UpdateSettings) -> [KeyChange<'_>; 3] {
     [
         KeyChange {
             kind: SecretKind::Translation,
@@ -251,6 +251,54 @@ fn replace_shortcuts(app: &AppHandle, translation: &str, ocr: &str) -> Result<()
     app.global_shortcut()
         .register(ocr)
         .map_err(|_| AppError::invalid("ocrShortcut", UNAVAILABLE))
+}
+
+/// Whether a shortcut typed into the form could be registered: `ok`, `invalid` (not a
+/// shortcut) or `taken` (another program holds it). The two shortcuts this application has
+/// registered itself count as available.
+#[tauri::command]
+pub fn check_shortcut(shortcut: String, app: AppHandle) -> &'static str {
+    let Ok(parsed) = shortcut
+        .trim()
+        .parse::<tauri_plugin_global_shortcut::Shortcut>()
+    else {
+        return "invalid";
+    };
+    #[cfg(debug_assertions)]
+    if crate::qa::directory().is_some() {
+        return "ok";
+    }
+    let shortcuts = app.global_shortcut();
+    if shortcuts.is_registered(parsed) {
+        return "ok";
+    }
+    match shortcuts.register(parsed) {
+        Ok(()) => {
+            let _ = shortcuts.unregister(parsed);
+            "ok"
+        }
+        Err(_) => "taken",
+    }
+}
+
+/// Opens the page where the default provider issues API keys. The address is fixed here;
+/// nothing a window sends can change where the browser goes.
+#[tauri::command]
+pub fn open_api_key_page() -> Result<(), AppError> {
+    const PAGE: &str = "https://bailian.console.aliyun.com/?tab=model#/api-key";
+    #[cfg(windows)]
+    {
+        std::process::Command::new("explorer.exe")
+            .arg(PAGE)
+            .spawn()
+            .map(|_| ())
+            .map_err(|error| AppError::Internal(error.to_string()))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = PAGE;
+        Err(AppError::UnsupportedPlatform)
+    }
 }
 
 fn set_auto_start(app: &AppHandle, enabled: bool) -> Result<(), AppError> {

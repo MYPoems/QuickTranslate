@@ -192,6 +192,124 @@ test("a rejected setting shows the backend's reason and takes the user to the fi
   } finally { close(); }
 });
 
+test("a key press becomes a shortcut only when it is a usable combination", async () => {
+  const { shortcutFromEvent } = await import("../src/settings/shortcut");
+  const press = (code: string, modifiers: Partial<Record<"ctrlKey" | "altKey" | "shiftKey" | "metaKey", boolean>> = {}) =>
+    shortcutFromEvent({ code, ctrlKey: false, altKey: false, shiftKey: false, metaKey: false, ...modifiers });
+  assert.equal(press("KeyQ", { altKey: true }).shortcut, "Alt+Q");
+  assert.equal(press("KeyT", { ctrlKey: true, shiftKey: true }).shortcut, "Ctrl+Shift+T");
+  assert.equal(press("Digit2", { ctrlKey: true, altKey: true }).shortcut, "Ctrl+Alt+2");
+  assert.equal(press("F8").shortcut, "F8", "a function key needs no modifier");
+  assert.equal(press("ArrowUp", { altKey: true }).shortcut, "Alt+Up");
+  for (const refused of [press("KeyQ"), press("KeyQ", { shiftKey: true }), press("AltLeft", { altKey: true }), press("KeyQ", { altKey: true, metaKey: true })]) {
+    assert.equal(refused.shortcut, undefined);
+    assert.ok(refused.problem);
+  }
+});
+
+test("settings record shortcuts from key presses and warn about clashes as they happen", async () => {
+  const { element, qa, calls, dom, close } = await mount("settings");
+  try {
+    const original = qa.invoke;
+    qa.invoke = async (command, args = {}) => { if (command === "check_shortcut") { calls.push({ command, args }); return args.shortcut === "Ctrl+Alt+L" ? "taken" : "ok"; } return original(command, args); };
+    const field = element<HTMLInputElement>('[name="globalShortcut"]');
+    const hint = element("#globalShortcut-hint");
+    assert.equal(field.readOnly, true);
+    const press = (init: KeyboardEventInit) => field.dispatchEvent(new dom.window.KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+
+    press({ code: "KeyE", key: "e" }); await settle();
+    assert.equal(field.value, "Alt+Q", "a bare letter is not accepted");
+    assert.match(hint.textContent || "", /Ctrl、Alt 或 Shift/);
+
+    press({ code: "KeyE", key: "e", altKey: true }); await settle();
+    assert.equal(field.value, "Alt+E");
+    assert.equal(field.hasAttribute("aria-invalid"), false);
+    assert.equal(element("#save").hasAttribute("disabled"), false, "recording counts as an unsaved change");
+
+    press({ code: "KeyW", key: "w", altKey: true }); await settle();
+    assert.equal(field.getAttribute("aria-invalid"), "true", "same as the OCR shortcut");
+    assert.match(hint.textContent || "", /相同/);
+
+    press({ code: "KeyL", key: "l", ctrlKey: true, altKey: true }); await settle();
+    assert.match(hint.textContent || "", /占用/);
+    assert.equal(field.getAttribute("aria-invalid"), "true");
+  } finally { close(); }
+});
+
+test("settings show unsaved changes per category, can discard them, and save review rules with everything else", async () => {
+  const { element, qa, calls, dom, close } = await mount("settings");
+  try {
+    const original = qa.invoke;
+    qa.invoke = async (command, args = {}) => command === "list_vocabulary" ? (calls.push({ command, args }), { entries: [], total: 0, due: 0, tests: 0, mastered: 0, now: 1, rules: { intervalHours: 4, dailyLimit: 20 } }) : original(command, args);
+    element("#discard").click(); await settle();   // reload with the rules available
+    const save = element<HTMLButtonElement>("#save"), discard = element<HTMLButtonElement>("#discard");
+    const tab = (id: string) => element(`[data-settings-tab="${id}"]`);
+    assert.equal(save.disabled, true, "nothing to save yet");
+    assert.equal(discard.hidden, true);
+    assert.equal(element("#save-learning"), null, "one Save button for every category");
+
+    const model = element<HTMLInputElement>('[name="model"]'); model.value = "another-model"; model.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    assert.equal(save.disabled, false);
+    assert.equal(discard.hidden, false);
+    assert.equal(tab("translation").dataset.dirty, "true");
+    assert.equal(tab("ocr").dataset.dirty, "false");
+    model.value = "qwen-turbo"; model.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    assert.equal(save.disabled, true, "changing a value back is not a change");
+
+    const limit = element<HTMLInputElement>('[name="dailyLimit"]'); limit.value = "35"; limit.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    assert.equal(tab("learning").dataset.dirty, "true");
+    element<HTMLFormElement>("form").dispatchEvent(new dom.window.Event("submit", { cancelable: true })); await settle();
+    assert.deepEqual(calls.find(call => call.command === "set_vocabulary_rules")?.args, { rules: { intervalHours: 4, dailyLimit: 35 } });
+    assert.ok(calls.some(call => call.command === "save_settings"));
+    assert.equal(save.disabled, true, "saved state is the new baseline");
+
+    model.value = "temporary"; model.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    discard.click(); await settle();
+    assert.equal(model.value, "qwen-turbo");
+    assert.equal(save.disabled, true);
+  } finally { close(); }
+});
+
+test("settings show the key saved for the address in the form and test cloud OCR without the screen", async () => {
+  const { element, qa, calls, dom, close } = await mount("settings");
+  try {
+    const original = qa.invoke;
+    qa.invoke = async (command, args = {}) => {
+      if (command === "get_key_status") { calls.push({ command, args }); return { apiKeyConfigured: args.baseUrl === "https://api.deepseek.com/v1", cloudOcrApiKeyConfigured: false, cloudSpeechApiKeyConfigured: false }; }
+      if (command === "test_cloud_ocr") { calls.push({ command, args }); return { elapsedMs: 420, recognized: true }; }
+      return original(command, args);
+    };
+    assert.match(element("#key-status").textContent || "", /尚未配置/);
+    const provider = element<HTMLSelectElement>('[name="provider"]'); provider.value = "DeepSeek"; provider.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 320)); await settle();
+    assert.equal(calls.filter(call => call.command === "get_key_status").at(-1)?.args.baseUrl, "https://api.deepseek.com/v1");
+    assert.match(element("#key-status").textContent || "", /已保存这个服务地址/);
+
+    element("#test-cloud-ocr").click(); await settle();
+    assert.ok(calls.some(call => call.command === "test_cloud_ocr"));
+    assert.match(element("#status").textContent || "", /连接成功.*420 ms/);
+    for (const label of ["服务商", "服务地址", "模型"]) assert.ok(element("#settings-translation").textContent?.includes(label), label);
+    assert.doesNotMatch(element("#settings-translation").textContent || "", /Base URL|Provider/);
+  } finally { close(); }
+});
+
+test("settings categories form a tab list that arrow keys walk through", async () => {
+  const { element, dom, close } = await mount("settings");
+  try {
+    const nav = element(".settings-nav"), first = element('[data-settings-tab="translation"]'), second = element('[data-settings-tab="ocr"]');
+    assert.equal(nav.getAttribute("role"), "tablist");
+    assert.equal(first.getAttribute("aria-selected"), "true");
+    assert.equal(element("#settings-ocr").getAttribute("aria-labelledby"), second.id);
+    first.focus();
+    first.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true, cancelable: true }));
+    assert.equal(second.getAttribute("aria-selected"), "true");
+    assert.equal(second.tabIndex, 0);
+    assert.equal(first.tabIndex, -1);
+    assert.equal(element("#settings-ocr").hidden, false);
+    assert.equal(dom.window.document.activeElement, second);
+  } finally { close(); }
+});
+
 test("popup yields Ctrl+C to an in-flight selection capture and drops the old source when a new request fails outright", async () => {
   const { element, qa, calls, dom, close } = await mount("popup");
   try {

@@ -8,6 +8,11 @@ use crate::{config::AppSettings, errors::AppError};
 
 const MAX_CLOUD_IMAGE_BYTES: usize = 7_000_000;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
+/// A small built-in picture of two lines of text, for testing a connection without sending
+/// anything from the user's screen.
+pub const CONNECTION_TEST_IMAGE: &[u8] = include_bytes!("../../assets/ocr-connection-test.png");
+/// A word in that picture; finding it in the reply means the model really read the image.
+pub const CONNECTION_TEST_WORD: &str = "quicktranslate";
 const OCR_PROMPT: &str =
     "请准确提取图片中的全部原始文字，保持阅读顺序、换行、大小写和标点。只输出识别文字，不要解释，不要翻译，不要使用代码块。";
 

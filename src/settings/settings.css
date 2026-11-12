@@ -5,7 +5,14 @@
 .settings-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 145px minmax(0, 1fr); }
 .settings-nav { background: var(--surface); border-right: 1px solid var(--line); padding: 14px 10px; display: flex; flex-direction: column; gap: 5px; }
 .settings-nav button { border: 0; border-radius: 8px; padding: 10px; text-align: left; font-size: 13px; background: transparent; color: var(--muted); }
-.settings-nav button[aria-pressed="true"] { background: var(--selected); color: var(--accent); }
+.settings-nav button[aria-selected="true"] { background: var(--selected); color: var(--accent); }
+.settings-nav button[data-dirty="true"]::after { content: ""; display: inline-block; width: 6px; height: 6px; margin-left: 6px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
+.shortcut-field { display: grid; gap: 6px; }
+.shortcut-field input { cursor: pointer; font-variant-numeric: tabular-nums; }
+.shortcut-field input:focus { border-color: var(--accent); }
+.field-hint { margin: 0; font-size: 12px; color: var(--muted); min-height: 18px; }
+.field-hint[data-kind="error"] { color: var(--danger); }
+.form-actions button:disabled { opacity: .55; cursor: default; }
 .settings-nav button:hover { color: var(--text); }
 .settings-panels { overflow: auto; min-width: 0; padding: 24px 28px; }
 .settings-panels > section { display: grid; gap: 16px; }

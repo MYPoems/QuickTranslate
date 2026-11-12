@@ -2,7 +2,8 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     path::{Path, PathBuf},
-    time::Duration,
+    sync::Mutex,
+    time::{Duration, SystemTime},
 };
 
 use serde::Serialize;
@@ -170,9 +171,35 @@ fn write_atomically(path: &Path, bytes: &[u8]) -> Result<(), AppError> {
     fs::rename(&temp, path).map_err(|error| AppError::Ocr(format!("无法安装插件：{error}")))
 }
 
+/// Files already hashed in this process, with the size and modification time they had then.
+/// The status is queried on every settings load and every local OCR run; hashing 31 MB each
+/// time made both visibly slower. A file is hashed again whenever its size or timestamp
+/// changes, and always once after the application starts.
+static VERIFIED: Mutex<Vec<(PathBuf, u64, SystemTime)>> = Mutex::new(Vec::new());
+
 fn verify_file(path: &Path, expected_bytes: u64, expected_hash: &str) -> bool {
-    fs::metadata(path).is_ok_and(|value| value.len() == expected_bytes)
-        && fs::read(path).is_ok_and(|bytes| sha256(&bytes) == expected_hash)
+    let Ok(metadata) = fs::metadata(path) else {
+        return false;
+    };
+    if metadata.len() != expected_bytes {
+        return false;
+    }
+    let stamp = metadata.modified().ok();
+    let known = |entry: &(PathBuf, u64, SystemTime)| {
+        entry.0 == path && entry.1 == expected_bytes && Some(entry.2) == stamp
+    };
+    if VERIFIED
+        .lock()
+        .is_ok_and(|verified| verified.iter().any(known))
+    {
+        return true;
+    }
+    let valid = fs::read(path).is_ok_and(|bytes| sha256(&bytes) == expected_hash);
+    if let (true, Some(stamp), Ok(mut verified)) = (valid, stamp, VERIFIED.lock()) {
+        verified.retain(|entry| entry.0 != path);
+        verified.push((path.to_path_buf(), expected_bytes, stamp));
+    }
+    valid
 }
 
 fn sha256(bytes: &[u8]) -> String {
@@ -191,6 +218,29 @@ mod tests {
         ));
         assert!(!status(&path).installed);
         assert_eq!(status(&path).download_bytes, 31_211_520);
+    }
+
+    #[test]
+    fn a_verified_file_is_rehashed_once_it_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("model.bin");
+        fs::write(&path, b"QuickTranslate").unwrap();
+        let hash = sha256(b"QuickTranslate");
+        assert!(verify_file(&path, 14, &hash));
+        assert!(verify_file(&path, 14, &hash), "served from the cache");
+
+        // Same length, different bytes and a new timestamp: must not be trusted.
+        let later = SystemTime::now() + Duration::from_secs(5);
+        fs::write(&path, b"quicktranslate").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        assert!(!verify_file(&path, 14, &hash));
+        assert!(!verify_file(&path, 13, &hash));
+        assert!(!verify_file(&directory.path().join("missing"), 14, &hash));
     }
 
     #[test]

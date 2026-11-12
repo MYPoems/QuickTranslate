@@ -44,6 +44,8 @@ const COMMANDS: &[&str] = &[
     "retranslate_text",
     "translate_input",
     "open_settings",
+    "cancel_request",
+    "start_ocr_selection",
     "copy_translation",
     "clear_translation_cache",
     "list_translation_history",

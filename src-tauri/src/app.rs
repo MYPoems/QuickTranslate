@@ -122,6 +122,20 @@ impl AppState {
         (request_id, next)
     }
 
+    /// The cancellation token of the request now on screen.
+    pub(crate) fn active_token(&self) -> CancellationToken {
+        self.active_request
+            .lock()
+            .map(|active| active.clone())
+            .unwrap_or_default()
+    }
+
+    /// Abandons the request on screen: its work is cancelled and anything it still produces
+    /// is ignored. Returns the id that now counts as current.
+    pub(crate) fn cancel_active(&self) -> u64 {
+        self.begin_request().0
+    }
+
     pub(crate) fn is_latest(&self, request_id: u64) -> bool {
         self.latest_request.load(Ordering::Relaxed) == request_id
     }

@@ -194,6 +194,8 @@ pub fn run() {
             commands::translation::retranslate_text,
             commands::translation::translate_input,
             commands::translation::open_settings,
+            commands::translation::cancel_request,
+            commands::ocr::start_ocr_selection,
             commands::translation::copy_translation,
             commands::translation::clear_translation_cache,
             commands::translation::list_translation_history,

@@ -154,13 +154,15 @@ async fn recognize_region(
             .map_err(|error| AppError::Ocr(error.to_string()))?;
             let recognized = match screenshot {
                 Ok(png) => {
-                    cloud::recognize(
-                        &app.state::<AppState>().http_client,
-                        &settings,
-                        &api_key,
-                        &png,
-                    )
-                    .await
+                    // The upload and the recognition can take a while; the user may cancel.
+                    let state = app.state::<AppState>();
+                    let cancelled = state.active_token();
+                    let recognition =
+                        cloud::recognize(&state.http_client, &settings, &api_key, &png);
+                    match cancelled.run_until_cancelled(recognition).await {
+                        Some(recognized) => recognized,
+                        None => return Ok(OcrRegionResult::Completed { request_id }),
+                    }
                 }
                 Err(error) => Err(error),
             };
@@ -242,8 +244,11 @@ pub fn complete_paddle_ocr(request_id: u64, text: String, app: AppHandle) -> Res
 
 #[tauri::command]
 pub fn fail_paddle_ocr(request_id: u64, message: String, app: AppHandle) -> Result<u64, AppError> {
-    let mut message = message.replace(['\r', '\n'], " ");
-    message.truncate(240);
+    let message: String = message
+        .replace(['\r', '\n'], " ")
+        .chars()
+        .take(240)
+        .collect();
     Ok(finish_ocr_error(
         &app,
         request_id,
@@ -270,6 +275,18 @@ pub fn uninstall_paddle_ocr_plugin(
     app: AppHandle,
 ) -> Result<plugin::PaddleOcrPluginStatus, AppError> {
     plugin::uninstall(&app.state::<AppState>().ocr_plugin_dir)
+}
+
+/// Opens the screenshot overlay again, for the popup's "select again".
+#[tauri::command]
+pub fn start_ocr_selection(app: AppHandle) {
+    if app
+        .get_webview_window("ocr")
+        .is_some_and(|window| window.is_visible().unwrap_or(false))
+    {
+        return;
+    }
+    crate::window::toggle_ocr_overlay(&app);
 }
 
 #[tauri::command]

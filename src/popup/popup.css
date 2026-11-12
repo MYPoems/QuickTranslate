@@ -31,6 +31,7 @@
 .definitions { padding-left: 20px; line-height: 1.6; font-size: 14px; }
 .inline-loading { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; padding: 12px 0; }
 .inline-loading p { margin: 0; }
+.inline-loading .inline-retry { margin-left: auto; }
 .spinner { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .75s linear infinite; }
 
 /* A failure says what happened, why when that helps, and what to do next. */

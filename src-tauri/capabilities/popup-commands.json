@@ -17,6 +17,8 @@
     "allow-retranslate-text",
     "allow-translate-input",
     "allow-open-settings",
+    "allow-cancel-request",
+    "allow-start-ocr-selection",
     "allow-copy-translation",
     "allow-get-popup-pinned",
     "allow-set-popup-pinned",

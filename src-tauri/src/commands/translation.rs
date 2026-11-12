@@ -66,6 +66,13 @@ pub fn translate_input(text: String, app: AppHandle) -> u64 {
     crate::app::trigger_text_translation(app, text)
 }
 
+/// Stops the request on screen, whether it is recognising a screenshot or translating.
+/// Returns the id the popup should treat as current from now on.
+#[tauri::command]
+pub fn cancel_request(app: AppHandle) -> u64 {
+    app.state::<AppState>().cancel_active()
+}
+
 /// Opens the settings window, for the popup's "configure" prompts.
 #[tauri::command]
 pub fn open_settings(app: AppHandle) {

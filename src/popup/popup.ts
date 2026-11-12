@@ -58,6 +58,7 @@ export function mountPopup(): void {
         <button id="copy-source" role="menuitem" type="button" disabled>复制原文 <small>Ctrl+Shift+C</small></button>
         <button id="manual-input" role="menuitem" type="button">手动输入翻译 <small>Alt+I</small></button>
         <label class="menu-select">译成<select id="target-language" disabled><option value="">自动</option></select></label>
+        <button id="reselect" role="menuitem" type="button" hidden>重新框选截图</button>
         <hr><button id="collect-batch" role="menuitem" type="button">选取生词 / 批量收藏</button>
         <button id="open-book" role="menuitem" type="button">打开生词本</button>
         <hr><details><summary>模型与请求信息</summary><p id="meta">就绪</p></details>
@@ -81,6 +82,7 @@ export function mountPopup(): void {
     closeMenu();
     void retranslate();
   });
+  el("#reselect").addEventListener("click", () => { closeMenu(); void invoke("start_ocr_selection"); });
   el("#pin").addEventListener("click", () => void togglePin());
   el("#close").addEventListener("click", () => void hide());
   el("#more").addEventListener("mousedown", event => event.preventDefault());
@@ -99,6 +101,8 @@ export function mountPopup(): void {
     else if (action === "retry") void retranslate();
     else if (action === "manual-input") openManualInput();
     else if (action === "cancel-input") closeManualInput();
+    else if (action === "reselect") void invoke("start_ocr_selection");
+    else if (action === "cancel-request") void cancelRequest();
     if (!target.closest("#popup-menu, #more")) closeMenu();
   });
   root.addEventListener("submit", event => {
@@ -317,10 +321,32 @@ function render(event: TranslationEvent): void {
   el<HTMLButtonElement>("#copy-source").disabled = !currentSource;
   el<HTMLButtonElement>("#retranslate").disabled = !currentSource || loading;
   el<HTMLSelectElement>("#target-language").disabled = !currentSource || loading;
+  el("#reselect").hidden = currentSourceKind !== "ocr";
   el("#meta").textContent = event.result ? `${event.result.provider} · ${event.result.model}` : event.error?.code || "正在请求服务";
   el("#badge").textContent = event.result?.cached ? "缓存" : "";
   el("#badge").hidden = !event.result?.cached;
   refreshReadingButtons();
+  refreshCollection();
+}
+
+// Stops whatever is in progress and returns to the idle view. The backend hands back the
+// id that now counts as current, so anything the abandoned request still sends is ignored.
+async function cancelRequest(): Promise<void> {
+  if (!loading) return;
+  try {
+    const next = await invoke<number>("cancel_request");
+    if (typeof next === "number") currentRequestId = Math.max(currentRequestId, next);
+  } catch { /* The request finishes on its own; the view below is still right. */ }
+  loading = false;
+  lastEvent = undefined;
+  currentSource = "";
+  currentTranslation = "";
+  el<HTMLButtonElement>("#copy").disabled = true;
+  el<HTMLButtonElement>("#copy-source").disabled = true;
+  el<HTMLButtonElement>("#retranslate").disabled = true;
+  el<HTMLSelectElement>("#target-language").disabled = true;
+  el("#badge").hidden = true;
+  renderIdle();
   refreshCollection();
 }
 

@@ -508,6 +508,28 @@ test("settings carry the language pair, glossary and extra requirements", async 
   } finally { plain.close(); }
 });
 
+test("a request in progress can be cancelled, and a screenshot can be selected again", async () => {
+  const { element, qa, calls, dom, close } = await mount("popup", { cancel_request: 8 });
+  try {
+    assert.equal(element("#reselect").hidden, true, "nothing to reselect before a screenshot");
+    qa.emit("translation-state", { requestId: 7, status: "loading", sourceKind: "ocr" });
+    assert.match(element("#content").textContent || "", /正在识别图片文字/);
+    element('[data-action="cancel-request"]').click(); await settle();
+    assert.ok(calls.some(call => call.command === "cancel_request"));
+    assert.match(element("#source").textContent || "", /选择文字后按/, "back to the idle view");
+    assert.equal(dom.window.document.querySelector(".inline-loading"), null);
+    qa.emit("translation-state", { requestId: 7, status: "success", sourceKind: "ocr", result: { sourceText: "迟到", translation: "late", detectedLanguage: "chinese", targetLanguage: "english", provider: "QA", model: "test", cached: false } });
+    assert.doesNotMatch(element("#content").textContent || "", /late/, "the cancelled request cannot come back");
+
+    qa.emit("translation-state", { requestId: 9, status: "error", error: { code: "OCR_NO_TEXT", message: "所选区域未识别到文字" } });
+    assert.equal(element('[data-action="reselect"]').textContent, "重新框选");
+    element('[data-action="reselect"]').click(); await settle();
+    assert.equal(calls.filter(call => call.command === "start_ocr_selection").length, 1);
+    qa.emit("translation-state", { requestId: 10, status: "success", sourceKind: "ocr", result: { sourceText: "原文", translation: "text", detectedLanguage: "chinese", targetLanguage: "english", provider: "QA", model: "test", cached: false } });
+    assert.equal(element("#reselect").hidden, false, "a screenshot result offers to select again");
+  } finally { close(); }
+});
+
 test("popup yields Ctrl+C to an in-flight selection capture and drops the old source when a new request fails outright", async () => {
   const { element, qa, calls, dom, close } = await mount("popup");
   try {

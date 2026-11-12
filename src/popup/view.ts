@@ -3,12 +3,13 @@ import { speakerMarkup } from "../ui/icons";
 import type { AppError, TranslationResult } from "../types";
 
 /** What the popup offers next to an error message. */
-export type ErrorAction = "open-settings" | "retry" | "manual-input";
+export type ErrorAction = "open-settings" | "retry" | "manual-input" | "reselect";
 
 const actionLabels: Record<ErrorAction, string> = {
   "open-settings": "打开设置",
   retry: "重试",
   "manual-input": "手动输入",
+  reselect: "重新框选",
 };
 
 /**
@@ -23,6 +24,10 @@ export function errorActions(code: string | undefined, hasSource: boolean): Erro
     case "NO_SELECTED_TEXT":
     case "CLIPBOARD_ERROR":
       return ["manual-input"];
+    case "OCR_NO_TEXT":
+      return ["reselect"];
+    case "OCR_ERROR":
+      return ["reselect", "open-settings"];
     case "TEXT_TOO_LONG":
       return [];
     case "NETWORK_ERROR":
@@ -141,10 +146,11 @@ export function buildSelectionSource(text: string): HTMLElement {
   return section;
 }
 
+/** A spinner with what is going on and a way to stop it. */
 export function buildLoading(text: string): HTMLElement {
   const loading = document.createElement("div");
   loading.className = "inline-loading";
-  loading.innerHTML = '<div class="spinner" aria-hidden="true"></div><p></p>';
+  loading.innerHTML = '<div class="spinner" aria-hidden="true"></div><p></p><button type="button" class="text-button inline-retry" data-action="cancel-request">取消</button>';
   loading.querySelector("p")!.textContent = text;
   return loading;
 }

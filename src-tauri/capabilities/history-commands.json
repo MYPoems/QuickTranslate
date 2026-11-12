@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "history-commands",
+  "description": "What the history window may ask of the backend: list, open, favourite and delete history, read aloud",
+  "windows": ["history"],
+  "permissions": [
+    "allow-get-appearance-preferences",
+    "allow-get-speech-preferences",
+    "allow-stream-cloud-speech",
+    "allow-synthesize-speech",
+    "allow-stop-speech",
+    "allow-copy-translation",
+    "allow-clear-translation-cache",
+    "allow-list-translation-history",
+    "allow-open-history-translation",
+    "allow-set-history-favorite",
+    "allow-delete-history-entry"
+  ]
+}

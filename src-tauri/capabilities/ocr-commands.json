@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "ocr-commands",
+  "description": "What the screenshot overlay may ask of the backend: recognise a region and close itself",
+  "windows": ["ocr"],
+  "permissions": [
+    "allow-recognize-ocr-region",
+    "allow-complete-paddle-ocr",
+    "allow-fail-paddle-ocr",
+    "allow-hide-ocr-window"
+  ]
+}

@@ -57,6 +57,18 @@ pub async fn retranslate_text(
     }
 }
 
+/// Translates text typed or pasted into the popup; the result arrives as popup events.
+#[tauri::command]
+pub fn translate_input(text: String, app: AppHandle) -> u64 {
+    crate::app::trigger_text_translation(app, text)
+}
+
+/// Opens the settings window, for the popup's "configure" prompts.
+#[tauri::command]
+pub fn open_settings(app: AppHandle) {
+    crate::window::show_settings(&app);
+}
+
 #[tauri::command]
 pub async fn copy_translation(text: String, shortcut: Option<bool>) -> Result<bool, AppError> {
     platform::copy_text(text, shortcut.unwrap_or(false)).await

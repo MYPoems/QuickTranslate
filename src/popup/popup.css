@@ -1,31 +1,52 @@
 .popup-window { background: transparent; padding: 0; }
 .popup-shell { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: color-mix(in srgb, var(--bg) var(--popup-opacity), transparent); }
-.popup-header { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 7px 12px; gap: 12px; border-bottom: 1px solid var(--line); min-height: 42px; font-size: 13px; font-weight: 500; }
-.popup-title { flex: none; }
+
+/* One header line: what is being translated, then the caption drag area, then the window controls. */
+.popup-header { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 7px 12px 7px 16px; gap: 8px; border-bottom: 1px solid var(--line); min-height: 42px; font-size: 13px; }
+.popup-title { flex: 0 1 auto; min-width: 0; max-width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.badge { border-radius: 6px; padding: 3px 6px; font-size: 11px; background: var(--raised); color: var(--muted); flex: none; }
 /* The native resize perimeter stays outside this inset caption region. */
-.popup-drag-region { flex: 1; min-width: 0; align-self: stretch; margin-block: 4px; cursor: default; user-select: none; }
+.popup-drag-region { flex: 1; min-width: 24px; align-self: stretch; margin-block: 4px; cursor: default; user-select: none; }
 .popup-window-controls { display: flex; flex: none; gap: 4px; }
 .icon-button { border: 0; background: transparent; color: var(--muted); border-radius: 7px; padding: 6px; display: inline-flex; width: 30px; height: 30px; align-items: center; justify-content: center; }
 .icon-button:hover { background: var(--raised); }
 #pin[aria-pressed="true"] { background: var(--selected); color: var(--accent); }
-.source-row { display: flex; align-items: center; gap: 8px; padding: 10px 16px 4px; flex: none; }
-.source { margin: 0; flex: 1; min-width: 0; font-size: 12px; color: var(--muted); }
-.badge { border-radius: 6px; padding: 3px 6px; font-size: 11px; background: var(--raised); color: var(--muted); flex: none; }
-.content { flex: 1; min-height: 0; overflow: auto; padding: 8px 16px 16px; }
-.content.idle { display: flex; align-items: center; justify-content: center; }
-.source-section { border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 14px; }
+
+.content { flex: 1; min-height: 0; overflow: auto; padding: 10px 16px 16px; }
+.content.idle { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+.source-section { border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 12px; }
 .original-text { font-size: 14px; line-height: 1.6; }
+/* A long source would push the translation out of view; it opens on request. */
+.original-text[data-collapsed="true"] { max-height: 4.8em; overflow: hidden; mask-image: linear-gradient(#000 60%, transparent); }
 .recognized-text { display: block; width: 100%; resize: vertical; max-height: 200px; min-height: 54px; border: 1px solid transparent; border-radius: 7px; padding: 5px; color: var(--text); background: transparent; font: inherit; line-height: 1.6; }
 .recognized-text:hover, .recognized-text:focus-visible { border-color: var(--line); background: color-mix(in srgb, var(--surface) 60%, transparent); }
 .translation { font-size: 18px; font-weight: 500; line-height: 1.65; }
+/* Text that is still arriving. */
+.translation.streaming { white-space: pre-wrap; overflow-wrap: anywhere; }
+.translation.streaming::after { content: "▍"; margin-left: 2px; color: var(--accent); animation: caret 1s steps(2) infinite; }
 .read-segment { margin: 0 0 6px; white-space: pre-wrap; overflow-wrap: anywhere; border-radius: 4px; }
 .reading-active { background: var(--selected); color: var(--accent); }
 .word-detail, .example, .hint { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.hint { margin: 0; }
 .definitions { padding-left: 20px; line-height: 1.6; font-size: 14px; }
 .inline-loading { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; padding: 12px 0; }
+.inline-loading p { margin: 0; }
 .spinner { width: 14px; height: 14px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .75s linear infinite; }
-.error-message, .reading-status[data-error="true"] { color: var(--danger); overflow-wrap: anywhere; }
+
+/* A failure says what happened, why when that helps, and what to do next. */
+.content.failed > .section-heading { display: none; }
+.error-box { display: grid; gap: 8px; }
+.error-box p { margin: 0; }
+.error-message, .reading-status[data-error="true"], .popup-toast[data-error="true"] { color: var(--danger); overflow-wrap: anywhere; }
+.error-hint { color: var(--muted); font-size: 13px; line-height: 1.6; }
+.error-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 2px; }
+.manual-form { display: grid; gap: 8px; }
+.manual-form textarea { width: 100%; min-height: 72px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: var(--surface); color: var(--text); font: inherit; line-height: 1.6; }
+.manual-form small { opacity: .75; font-size: 11px; }
+
 .reading-status { flex: none; margin: 0; padding: 4px 16px 8px; font-size: 12px; color: var(--muted); max-height: 65px; overflow: auto; }
+/* A confirmation that floats above the footer instead of relabelling a button. */
+.popup-toast { position: absolute; left: 12px; bottom: 58px; z-index: 1; margin: 0; padding: 5px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 12px; box-shadow: 0 4px 14px #0002; pointer-events: none; }
 .actions { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--line); flex: none; min-height: 50px; }
 .text-button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 13px; white-space: nowrap; }
 .text-button.primary-button { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-text); }
@@ -41,4 +62,23 @@
 .popup-menu summary { cursor: pointer; }
 .popup-menu p { color: var(--muted); overflow-wrap: anywhere; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-height: 250px) { .popup-header { min-height: 32px; padding: 2px 10px; }.source-row { padding-top: 4px; }.content { padding-top: 3px; }.actions { min-height: 42px; padding: 5px 10px; }.popup-menu { bottom: 48px; max-height: calc(100% - 60px); } }
+@keyframes caret { 50% { opacity: 0; } }
+
+/*
+ * A short popup has room for a few lines only. The translation is what it is for, so the
+ * source shrinks to one line, the section labels go, and the translation sits right under
+ * the header.
+ */
+@media (max-height: 260px) {
+  .popup-header { min-height: 32px; padding-block: 2px; }
+  .content { padding: 6px 12px 8px; }
+  .content > .section-heading, .source-section > .section-heading, #toggle-source { display: none; }
+  .source-section { padding-bottom: 4px; margin-bottom: 6px; }
+  .original-text, .original-text[data-collapsed="true"] { max-height: 1.6em; overflow: hidden; mask-image: none; font-size: 12px; color: var(--muted); }
+  .original-text .read-segment { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .recognized-text { min-height: 28px; max-height: 28px; padding-block: 2px; }
+  .translation { font-size: 16px; line-height: 1.5; }
+  .actions { min-height: 42px; padding: 5px 10px; }
+  .popup-menu { bottom: 48px; max-height: calc(100% - 60px); }
+  .popup-toast { bottom: 48px; }
+}

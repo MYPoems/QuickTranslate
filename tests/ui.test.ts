@@ -364,6 +364,97 @@ test("settings categories form a tab list that arrow keys walk through", async (
   } finally { close(); }
 });
 
+test("popup shows a translation as it streams in and ignores text for anything but the request on screen", async () => {
+  const { element, qa, calls, dom, close } = await mount("popup");
+  try {
+    const content = () => element("#content").textContent || "";
+    qa.emit("translation-state", { requestId: 3, status: "loading", sourceText: "Stay curious. Keep learning.", sourceKind: "selection" });
+    assert.match(content(), /正在翻译/);
+    qa.emit("translation-delta", { requestId: 2, text: "旧请求的文字" });
+    assert.doesNotMatch(content(), /旧请求/);
+    qa.emit("translation-delta", { requestId: 3, text: "保持好奇，" });
+    assert.equal(element(".translation.streaming").textContent, "保持好奇，");
+    assert.equal(dom.window.document.querySelector(".inline-loading"), null, "the spinner gives way to the text");
+    assert.equal(element<HTMLButtonElement>("#copy").disabled, true, "nothing to copy until it is complete");
+    qa.emit("translation-delta", { requestId: 3, text: "保持好奇，持续学习。" });
+    assert.equal(element(".translation.streaming").textContent, "保持好奇，持续学习。");
+    qa.emit("translation-state", { requestId: 3, status: "success", sourceKind: "selection", result: { sourceText: "Stay curious. Keep learning.", translation: "保持好奇，持续学习。", detectedLanguage: "english", targetLanguage: "chinese", provider: "QA", model: "test", cached: false } });
+    assert.equal(dom.window.document.querySelector(".translation.streaming"), null);
+    assert.equal(element<HTMLButtonElement>("#copy").disabled, false);
+    qa.emit("translation-delta", { requestId: 3, text: "迟到的片段" });
+    assert.doesNotMatch(content(), /迟到/, "a late piece does not disturb the finished result");
+
+    // The popup's own retranslation streams too, and only its latest attempt counts.
+    const pending: Array<(value: unknown) => void> = [];
+    const original = qa.invoke;
+    qa.invoke = async (command, args = {}) => command === "retranslate_text" ? (calls.push({ command, args }), new Promise(resolve => pending.push(resolve))) : original(command, args);
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "r", altKey: true }));
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "r", altKey: true }));
+    const [first, second] = calls.filter(call => call.command === "retranslate_text").map(call => call.args as { requestId: number; generation: number });
+    assert.equal(first.requestId, 3);
+    assert.notEqual(first.generation, second.generation);
+    qa.emit("translation-delta", { requestId: 3, generation: first.generation, text: "过期的重试" });
+    assert.doesNotMatch(content(), /过期的重试/);
+    qa.emit("translation-delta", { requestId: 3, generation: second.generation, text: "最新的重试" });
+    assert.match(content(), /最新的重试/);
+  } finally { close(); }
+});
+
+test("popup errors come with a next step, and text can be typed when nothing can be selected", async () => {
+  const { element, qa, calls, dom, close } = await mount("popup");
+  try {
+    const actions = () => Array.from(element("#content").querySelectorAll<HTMLButtonElement>("[data-action]")).map(button => button.dataset.action);
+    assert.deepEqual(actions(), ["manual-input"], "the idle popup offers typing as well");
+
+    qa.emit("translation-state", { requestId: 1, status: "loading", sourceText: "Hello", sourceKind: "selection" });
+    qa.emit("translation-state", { requestId: 1, status: "error", error: { code: "PROVIDER_NOT_CONFIGURED", message: "请先在设置中配置 API Key" } });
+    assert.deepEqual(actions(), ["open-settings"]);
+    element('[data-action="open-settings"]').click(); await settle();
+    assert.ok(calls.some(call => call.command === "open_settings"));
+
+    qa.emit("translation-state", { requestId: 2, status: "loading", sourceText: "Hello", sourceKind: "selection" });
+    qa.emit("translation-state", { requestId: 2, status: "error", error: { code: "NETWORK_ERROR", message: "网络连接失败" } });
+    assert.deepEqual(actions(), ["retry"]);
+    element('[data-action="retry"]').click(); await settle();
+    assert.equal(calls.filter(call => call.command === "retranslate_text").at(-1)?.args.text, "Hello");
+
+    qa.emit("translation-state", { requestId: 3, status: "error", error: { code: "NO_SELECTED_TEXT", message: "未检测到选中文字" } });
+    assert.deepEqual(actions(), ["manual-input"]);
+    assert.match(element(".error-hint").textContent || "", /Ctrl \+ Shift \+ T/, "the hint names the configured shortcut");
+    element('[data-action="manual-input"]').click();
+    const input = element<HTMLTextAreaElement>("#manual-text");
+    assert.equal(dom.window.document.activeElement, input);
+    element<HTMLFormElement>("#manual-form").dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); await settle();
+    assert.equal(calls.some(call => call.command === "translate_input"), false, "empty input is not sent");
+    input.value = "  Good morning  ";
+    input.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Enter", ctrlKey: true, bubbles: true, cancelable: true })); await settle();
+    assert.deepEqual(calls.find(call => call.command === "translate_input")?.args, { text: "Good morning" });
+
+    dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", cancelable: true })); await settle();
+    assert.equal(dom.window.document.querySelector("#manual-text"), null, "Esc leaves the input box first");
+    assert.equal(calls.some(call => call.command === "hide_translation_window"), false);
+    assert.equal(element(".error-message").textContent, "未检测到选中文字", "and returns to what was shown before");
+  } finally { close(); }
+});
+
+test("a long selection starts collapsed so the translation stays in view", async () => {
+  const { element, qa, dom, close } = await mount("popup");
+  try {
+    const long = Array.from({ length: 6 }, (_, index) => `Paragraph ${index + 1} of a long selection.`).join("\n");
+    const result = (sourceText: string) => ({ requestId: 1, status: "success", sourceKind: "selection", result: { sourceText, translation: "译文", detectedLanguage: "english", targetLanguage: "chinese", provider: "QA", model: "test", cached: false } });
+    qa.emit("translation-state", result(long));
+    const body = element(".original-text"), toggle = element("#toggle-source");
+    assert.equal(body.dataset.collapsed, "true");
+    assert.equal(body.querySelectorAll(".read-segment").length, 6, "the text is all there for reading aloud and selecting");
+    toggle.click();
+    assert.equal(body.dataset.collapsed, "false");
+    assert.equal(toggle.getAttribute("aria-expanded"), "true");
+    qa.emit("translation-state", { ...result("Short."), requestId: 2 });
+    assert.equal(dom.window.document.querySelector("#toggle-source"), null, "a short source needs no toggle");
+    assert.equal(element("#source").textContent, "划词翻译 · EN → 中文", "the header line says what is on screen");
+  } finally { close(); }
+});
+
 test("popup yields Ctrl+C to an in-flight selection capture and drops the old source when a new request fails outright", async () => {
   const { element, qa, calls, dom, close } = await mount("popup");
   try {
@@ -375,10 +466,12 @@ test("popup yields Ctrl+C to an in-flight selection capture and drops the old so
 
     dom.window.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "c", ctrlKey: true, bubbles: true })); await settle();
     assert.deepEqual(calls.filter(call => call.command === "copy_translation").map(call => call.args), [{ text: "保持好奇。", shortcut: true }]);
-    assert.doesNotMatch(element("#copy").textContent || "", /已复制|复制失败/, "a skipped copy leaves the button alone");
+    assert.equal(element("#popup-toast").hidden, true, "a skipped copy confirms nothing");
     element("#copy").click(); await settle();
     assert.equal(calls.filter(call => call.command === "copy_translation").at(-1)?.args.shortcut, false);
-    assert.match(element("#copy").textContent || "", /已复制/);
+    assert.equal(element("#popup-toast").hidden, false);
+    assert.equal(element("#popup-toast").textContent, "已复制译文");
+    assert.match(element("#copy").textContent || "", /^复制译文$/, "the button keeps its label and width");
 
     qa.emit("translation-state", { requestId: 2, status: "error", error: { code: "NO_SELECTED_TEXT", message: "未检测到选中文字" } });
     assert.equal(element(".error-message").textContent, "未检测到选中文字");

@@ -2,7 +2,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         RwLock,
     },
     time::Duration,
@@ -50,22 +50,46 @@ struct PersistedWindowState {
     schema_version: u32,
     popup_width: f64,
     popup_height: f64,
+    /// Whether the popup stays open when it loses focus. Absent in files written by
+    /// earlier versions, which also drop it again when they save the size.
+    #[serde(default)]
+    popup_pinned: bool,
 }
 
+/// The popup's remembered size and pinned state.
 pub struct PopupSizeStore {
     path: PathBuf,
     current: RwLock<PopupSize>,
+    pinned: AtomicBool,
     revision: AtomicU64,
 }
 
 impl PopupSizeStore {
     pub fn load(path: PathBuf) -> Self {
-        let current = read_size(&path).unwrap_or_default();
+        let state = read_state(&path);
         Self {
             path,
-            current: RwLock::new(current),
+            current: RwLock::new(
+                state
+                    .as_ref()
+                    .map(|state| PopupSize::new(state.popup_width, state.popup_height))
+                    .unwrap_or_default(),
+            ),
+            pinned: AtomicBool::new(state.is_some_and(|state| state.popup_pinned)),
             revision: AtomicU64::new(0),
         }
+    }
+
+    pub fn pinned(&self) -> bool {
+        self.pinned.load(Ordering::Relaxed)
+    }
+
+    /// Remembers the pinned state across restarts. A failed write only costs that.
+    pub fn set_pinned(&self, pinned: bool) -> std::io::Result<()> {
+        if self.pinned.swap(pinned, Ordering::Relaxed) == pinned {
+            return Ok(());
+        }
+        self.persist_current()
     }
 
     pub fn current(&self) -> PopupSize {
@@ -107,6 +131,7 @@ impl PopupSizeStore {
             schema_version: WINDOW_STATE_SCHEMA,
             popup_width: size.width,
             popup_height: size.height,
+            popup_pinned: self.pinned(),
         };
         let bytes = serde_json::to_vec_pretty(&state).map_err(std::io::Error::other)?;
         persist_atomically(&self.path, &bytes)
@@ -121,11 +146,10 @@ fn normalize_dimension(value: f64, min: f64, max: f64, fallback: f64) -> f64 {
     }
 }
 
-fn read_size(path: &Path) -> Option<PopupSize> {
+fn read_state(path: &Path) -> Option<PersistedWindowState> {
     let bytes = fs::read(path).ok()?;
     let state: PersistedWindowState = serde_json::from_slice(&bytes).ok()?;
-    (state.schema_version == WINDOW_STATE_SCHEMA)
-        .then(|| PopupSize::new(state.popup_width, state.popup_height))
+    (state.schema_version == WINDOW_STATE_SCHEMA).then_some(state)
 }
 
 fn persist_atomically(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
@@ -216,6 +240,27 @@ mod tests {
             PopupSizeStore::load(path.clone()).current(),
             PopupSize::new(744.0, 512.0)
         );
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn pinned_state_survives_a_restart_and_a_later_resize() {
+        let path = temp_path("popup-pinned");
+        fs::write(
+            &path,
+            br#"{"schemaVersion":1,"popupWidth":600,"popupHeight":400}"#,
+        )
+        .unwrap();
+        let store = PopupSizeStore::load(path.clone());
+        assert!(!store.pinned(), "files from earlier versions have no flag");
+        store.set_pinned(true).unwrap();
+
+        let reopened = PopupSizeStore::load(path.clone());
+        assert!(reopened.pinned());
+        assert_eq!(reopened.current(), PopupSize::new(600.0, 400.0));
+        let revision = reopened.update(640.0, 440.0).unwrap();
+        reopened.persist_if_current(revision).unwrap();
+        assert!(PopupSizeStore::load(path.clone()).pinned());
         let _ = fs::remove_file(path);
     }
 

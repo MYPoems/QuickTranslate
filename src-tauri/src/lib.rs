@@ -192,6 +192,8 @@ pub fn run() {
             commands::translation::translate_selected_text,
             commands::translation::translate_text,
             commands::translation::retranslate_text,
+            commands::translation::translate_input,
+            commands::translation::open_settings,
             commands::translation::copy_translation,
             commands::translation::clear_translation_cache,
             commands::translation::list_translation_history,

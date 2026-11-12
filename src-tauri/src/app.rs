@@ -35,7 +35,6 @@ pub struct AppState {
     pub vocabulary: Arc<crate::vocabulary::VocabularyStore>,
     pub vocabulary_generation: tokio::sync::Semaphore,
     latest_request: AtomicU64,
-    popup_pinned: AtomicBool,
     pub vocabulary_collection_open: AtomicBool,
     active_request: Mutex<CancellationToken>,
     last_error: RwLock<Option<DiagnosticError>>,
@@ -107,7 +106,6 @@ impl AppState {
             vocabulary,
             vocabulary_generation: tokio::sync::Semaphore::new(2),
             latest_request: AtomicU64::new(0),
-            popup_pinned: AtomicBool::new(false),
             vocabulary_collection_open: AtomicBool::new(false),
             active_request: Mutex::new(CancellationToken::new()),
             last_error: RwLock::new(None),
@@ -142,11 +140,11 @@ impl AppState {
     }
 
     pub fn popup_pinned(&self) -> bool {
-        self.popup_pinned.load(Ordering::Relaxed)
+        self.popup_size.pinned()
     }
 
     pub fn set_popup_pinned(&self, pinned: bool) {
-        self.popup_pinned.store(pinned, Ordering::Relaxed);
+        let _ = self.popup_size.set_pinned(pinned);
     }
 }
 
@@ -188,13 +186,23 @@ pub fn trigger_selected_translation(app: AppHandle) -> u64 {
 }
 
 pub fn trigger_ocr_translation(app: AppHandle, recognized_text: String) -> u64 {
+    trigger_translation(app, recognized_text, "ocr")
+}
+
+/// Translates text the user typed or pasted into the popup. It takes the same path as a
+/// selection: one request on screen at a time, cached, streamed.
+pub fn trigger_text_translation(app: AppHandle, text: String) -> u64 {
+    trigger_translation(app, text, "selection")
+}
+
+fn trigger_translation(app: AppHandle, text: String, source_kind: &'static str) -> u64 {
     let (request_id, cancellation) = app.state::<AppState>().begin_request();
     tauri::async_runtime::spawn(translate_request(
         app,
         request_id,
         cancellation,
-        recognized_text,
-        "ocr",
+        text,
+        source_kind,
     ));
     request_id
 }

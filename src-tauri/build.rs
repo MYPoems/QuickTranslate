@@ -42,6 +42,8 @@ const COMMANDS: &[&str] = &[
     "translate_selected_text",
     "translate_text",
     "retranslate_text",
+    "translate_input",
+    "open_settings",
     "copy_translation",
     "clear_translation_cache",
     "list_translation_history",

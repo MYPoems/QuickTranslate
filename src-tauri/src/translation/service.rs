@@ -176,14 +176,30 @@ impl TranslationService {
             .map_err(|error| AppError::Internal(error.to_string()))?
     }
 
+    /// Empties the history, optionally keeping favourites; the cache goes with it.
+    pub async fn clear_history(&self, keep_favorites: bool) -> Result<usize, AppError> {
+        let cache = Arc::clone(&self.cache);
+        tokio::task::spawn_blocking(move || cache.clear_history(keep_favorites))
+            .await
+            .map_err(|error| AppError::Internal(error.to_string()))?
+    }
+
+    pub async fn history_size(&self) -> Result<i64, AppError> {
+        let cache = Arc::clone(&self.cache);
+        tokio::task::spawn_blocking(move || cache.history_len())
+            .await
+            .map_err(|error| AppError::Internal(error.to_string()))?
+    }
+
     pub async fn history(
         &self,
         query: String,
         favorite_only: bool,
         limit: i64,
+        offset: i64,
     ) -> Result<Vec<HistoryEntry>, AppError> {
         let cache = Arc::clone(&self.cache);
-        tokio::task::spawn_blocking(move || cache.history(&query, favorite_only, limit))
+        tokio::task::spawn_blocking(move || cache.history(&query, favorite_only, limit, offset))
             .await
             .map_err(|error| AppError::Internal(error.to_string()))?
     }

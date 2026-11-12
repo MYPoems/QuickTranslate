@@ -162,7 +162,7 @@ export function mountSettings(): void {
         <div class="maintenance-card">
           <div>
             <strong>本地翻译缓存</strong>
-            <p>最多保留 1000 条常用译文，可随时清理。</p>
+            <p>最多保留 1000 条译文，用来加快重复翻译。清理缓存不会删除翻译历史和收藏。</p>
           </div>
           <button id="clear-cache" type="button" class="secondary">清理缓存</button>
         </div>
@@ -571,6 +571,7 @@ function formatDiagnostics(value: DiagnosticsView): string {
     `Cloud OCR API Key configured: ${value.cloudOcrApiKeyConfigured ? "yes" : "no"}`,
     `API Key configured: ${value.apiKeyConfigured ? "yes" : "no"}`,
     `Cache entries: ${value.cacheEntries}`,
+    `History entries: ${value.historyEntries ?? "?"}`,
     `Settings: ${value.settingsPath}`,
     `Cache: ${value.cachePath}`,
   ];

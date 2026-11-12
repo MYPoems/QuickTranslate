@@ -13,8 +13,14 @@ def audit(path: str) -> dict:
         integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
         if integrity != "ok":
             raise RuntimeError("Database integrity check failed")
-        rows = connection.execute("SELECT * FROM translation_cache ORDER BY id").fetchall()
-        favorites = connection.execute("SELECT COUNT(*) FROM translation_cache WHERE favorite = 1").fetchone()[0]
+        # Since the history got its own table it is the one to compare; older databases
+        # keep history and cache together in translation_cache.
+        split = connection.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'translation_history'"
+        ).fetchone()[0]
+        table = "translation_history" if split else "translation_cache"
+        rows = connection.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
+        favorites = connection.execute(f"SELECT COUNT(*) FROM {table} WHERE favorite = 1").fetchone()[0]
         digest = hashlib.sha256(json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         return {"rows": len(rows), "favorites": favorites, "digest": digest, "integrity": integrity}
 

@@ -10,8 +10,8 @@
     "allow-synthesize-speech",
     "allow-stop-speech",
     "allow-copy-translation",
-    "allow-clear-translation-cache",
     "allow-list-translation-history",
+    "allow-clear-translation-history",
     "allow-open-history-translation",
     "allow-set-history-favorite",
     "allow-delete-history-entry"

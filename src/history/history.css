@@ -24,3 +24,8 @@ body.history-window { padding:10px; background:var(--bg); }
 .history-status { border-top:1px solid var(--line); margin:0; padding:8px 16px; color:var(--muted); font-size:11px; min-height:31px; }.history-status[data-kind=error] { color:var(--danger); }
 #app[data-busy=true] .history-actions button,#app[data-busy=true] #clear-history { pointer-events:none; opacity:.6; }
 @media(max-width:600px) { .history-workspace { grid-template-columns:180px minmax(0,1fr); }.history-sidebar { padding:12px 8px; }#history-detail { padding:14px; }.header-note { display:none; }.history-actions { gap:6px; }.detail-more { margin-left:0; } }
+.history-group { margin:8px 4px 2px; font-size:11px; font-weight:500; color:var(--muted); letter-spacing:.04em; flex-shrink:0; }
+.history-group:first-child { margin-top:0; }
+.history-more { flex-shrink:0; margin:4px 0 8px; font-size:12px; }
+.history-maintenance button + button { margin-top:6px; }
+#app[data-busy=true] #clear-history-all { pointer-events:none; opacity:.6; }

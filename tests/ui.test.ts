@@ -669,6 +669,61 @@ test("history has independent speech, local popup opening and confirmed deletion
   } finally { close(); }
 });
 
+test("history groups by day, loads further pages, and is walked and edited from the keyboard", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const entry = (id: number, usedAt: number, favorite = false) => ({ id, sourceText: `Source ${id}`, translation: `译文 ${id}`, sourceLanguage: "en", targetLanguage: "zh", provider: "QA", model: "fixture", createdAt: usedAt, usedAt, favorite });
+  const firstPage = [entry(1, now - 400 * 86400, true), entry(2, now - 30), ...Array.from({ length: 98 }, (_, index) => entry(index + 3, now - 3 * 86400 - index))];
+  const { element, qa, calls, dom, close } = await mount("history");
+  try {
+    const original = qa.invoke;
+    qa.invoke = async (command, args = {}) => {
+      if (command === "list_translation_history") { calls.push({ command, args }); return args.offset ? [entry(500, now - 9 * 86400)] : firstPage; }
+      return original(command, args);
+    };
+    dom.window.dispatchEvent(new dom.window.Event("focus"));
+    element<HTMLInputElement>("#favorite-only").dispatchEvent(new dom.window.Event("change")); await settle();
+    const groups = () => Array.from(element("#history-list").querySelectorAll(".history-group")).map(node => node.textContent);
+    assert.deepEqual(groups(), ["收藏", "今天", "更早"]);
+    assert.match(element("#history-status").textContent || "", /已显示 100 条/);
+    const rows = () => Array.from(element("#history-list").querySelectorAll<HTMLButtonElement>(".history-row"));
+    assert.match(rows()[1].textContent || "", /刚刚/);
+
+    element(".history-more").click(); await settle();
+    assert.equal(calls.filter(call => call.command === "list_translation_history").at(-1)?.args.offset, 100);
+    assert.equal(rows().length, 101);
+    assert.equal(dom.window.document.querySelector(".history-more"), null, "a short page is the last one");
+    assert.match(element("#history-status").textContent || "", /显示 101 条记录/);
+
+    rows()[0].focus();
+    const key = (name: string) => element("#history-list").dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true }));
+    key("ArrowDown");
+    assert.equal(rows()[1].getAttribute("aria-pressed"), "true");
+    assert.equal(dom.window.document.activeElement, rows()[1], "focus follows the selection");
+    assert.match(element("#history-detail").textContent || "", /Source 2/);
+    key("f"); await settle();
+    assert.deepEqual(calls.find(call => call.command === "set_history_favorite")?.args, { id: 2, favorite: true });
+    key("Delete"); await settle();
+    assert.equal(element<HTMLDialogElement>("#history-confirm").open, true, "deleting still asks first");
+    element("#history-confirm-no").click(); await settle();
+    assert.equal(calls.some(call => call.command === "delete_history_entry"), false);
+  } finally { close(); }
+});
+
+test("clearing the history keeps favourites unless everything is asked for", async () => {
+  const { element, calls, close } = await mount("history");
+  try {
+    element("#clear-history").click(); await settle();
+    assert.match(element("#history-confirm-text").textContent || "", /已收藏的条目会保留/);
+    element("#history-confirm-yes").click(); await settle();
+    assert.deepEqual(calls.find(call => call.command === "clear_translation_history")?.args, { keepFavorites: true });
+    element("#clear-history-all").click(); await settle();
+    assert.match(element("#history-confirm-text").textContent || "", /已收藏的条目也会删除/);
+    element("#history-confirm-no").click(); await settle();
+    assert.equal(calls.filter(call => call.command === "clear_translation_history").length, 1, "cancelling clears nothing");
+    assert.equal(calls.some(call => call.command === "clear_translation_cache"), false);
+  } finally { close(); }
+});
+
 test("switching history during delayed speech preferences cancels stale audio", async () => {
   const { element, qa, calls, close } = await mount("history");
   try {

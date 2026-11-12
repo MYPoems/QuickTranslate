@@ -89,15 +89,31 @@ pub async fn clear_translation_cache(app: AppHandle) -> Result<usize, AppError> 
     app.state::<AppState>().translation.clear_cache().await
 }
 
+/// How many history entries one request returns; the window asks for more as it scrolls.
+pub const HISTORY_PAGE: i64 = 100;
+
 #[tauri::command]
 pub async fn list_translation_history(
     query: String,
     favorite_only: bool,
+    offset: Option<i64>,
     app: AppHandle,
 ) -> Result<Vec<HistoryEntry>, AppError> {
     app.state::<AppState>()
         .translation
-        .history(query, favorite_only, 200)
+        .history(query, favorite_only, HISTORY_PAGE, offset.unwrap_or(0))
+        .await
+}
+
+/// Empties the history (and the cache with it). Favourites stay unless asked otherwise.
+#[tauri::command]
+pub async fn clear_translation_history(
+    keep_favorites: bool,
+    app: AppHandle,
+) -> Result<usize, AppError> {
+    app.state::<AppState>()
+        .translation
+        .clear_history(keep_favorites)
         .await
 }
 

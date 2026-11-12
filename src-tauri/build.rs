@@ -49,6 +49,7 @@ const COMMANDS: &[&str] = &[
     "copy_translation",
     "clear_translation_cache",
     "list_translation_history",
+    "clear_translation_history",
     "open_history_translation",
     "set_history_favorite",
     "delete_history_entry",

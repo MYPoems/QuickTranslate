@@ -122,6 +122,7 @@ export interface DiagnosticsView {
   cloudOcrApiKeyConfigured: boolean;
   paddleOcrInstalled: boolean;
   cacheEntries: number;
+  historyEntries?: number;
   settingsPath: string;
   cachePath: string;
   lastError?: AppError;
@@ -149,6 +150,8 @@ export interface HistoryEntry {
   provider: string;
   model: string;
   createdAt: number;
+  /** When the text was last translated or looked up again. */
+  usedAt?: number;
   favorite: boolean;
 }
 

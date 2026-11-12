@@ -199,6 +199,7 @@ pub fn run() {
             commands::translation::copy_translation,
             commands::translation::clear_translation_cache,
             commands::translation::list_translation_history,
+            commands::translation::clear_translation_history,
             commands::translation::open_history_translation,
             commands::translation::set_history_favorite,
             commands::translation::delete_history_entry,

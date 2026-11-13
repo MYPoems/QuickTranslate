@@ -150,7 +150,18 @@ pub fn toggle_ocr_overlay(app: &AppHandle) {
 pub fn handle_ocr_focus_change(window: &Window, focused: bool) {
     if focused {
         OCR_OVERLAY_HAS_FOCUS.store(true, Ordering::Relaxed);
-    } else if OCR_OVERLAY_HAS_FOCUS.swap(false, Ordering::Relaxed) {
+        return;
+    }
+    #[cfg(windows)]
+    let foreground = window
+        .hwnd()
+        .ok()
+        .and_then(|handle| platform::window_is_foreground(handle.0 as isize));
+    #[cfg(not(windows))]
+    let foreground = None;
+    let had_focus = OCR_OVERLAY_HAS_FOCUS.load(Ordering::Relaxed);
+    if crate::popup_focus::should_hide_overlay_on_blur(had_focus, foreground) {
+        OCR_OVERLAY_HAS_FOCUS.store(false, Ordering::Relaxed);
         let _ = window.hide();
     }
 }

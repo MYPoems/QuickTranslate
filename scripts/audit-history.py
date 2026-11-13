@@ -5,6 +5,20 @@ import sqlite3
 import sys
 from pathlib import Path
 
+COLUMNS = [
+    "id",
+    "source_text",
+    "source_language",
+    "target_language",
+    "translation",
+    "result_json",
+    "provider",
+    "model",
+    "created_at",
+    "last_used_at",
+    "favorite",
+]
+
 
 def audit(path: str) -> dict:
     uri = Path(path).resolve().as_uri() + "?mode=ro"
@@ -19,7 +33,9 @@ def audit(path: str) -> dict:
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'translation_history'"
         ).fetchone()[0]
         table = "translation_history" if split else "translation_cache"
-        rows = connection.execute(f"SELECT * FROM {table} ORDER BY id").fetchall()
+        # The two tables have different columns (the cache also keeps its key and hit count),
+        # so compare what a history entry consists of rather than whole rows.
+        rows = connection.execute(f"SELECT {', '.join(COLUMNS)} FROM {table} ORDER BY id").fetchall()
         favorites = connection.execute(f"SELECT COUNT(*) FROM {table} WHERE favorite = 1").fetchone()[0]
         digest = hashlib.sha256(json.dumps(rows, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
         return {"rows": len(rows), "favorites": favorites, "digest": digest, "integrity": integrity}

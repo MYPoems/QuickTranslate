@@ -1,6 +1,6 @@
 # QuickTranslate
 
-当前版本：**v1.7.0**。修复 Word、Excel 和记事本里划词取不到文字的问题；新增流式翻译、日韩法德西俄等语言、术语表、手动输入翻译和首次使用引导；API Key 与服务地址绑定，翻译历史与缓存分开保存。升级时会发生的变化和尚未验证的部分见 [v1.7.0 发布说明](docs/releases/v1.7.0.md)，安装包与更新签名见 [v1.7.0 Release](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.7.0)。
+当前版本：**v1.7.1**。补丁版本，修复应用启动后第一次按截图快捷键时选区遮罩一闪就关的问题，见 [v1.7.1 发布说明](docs/releases/v1.7.1.md)。v1.7.0 修复了 Word、Excel 和记事本里划词取不到文字的问题，新增流式翻译、日韩法德西俄等语言、术语表、手动输入翻译和首次使用引导，API Key 与服务地址绑定，翻译历史与缓存分开保存；升级时会发生的变化见 [v1.7.0 发布说明](docs/releases/v1.7.0.md)。安装包与更新签名见 [v1.7.1 Release](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.7.1)。
 
 QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 OCR 翻译工具。它常驻系统托盘：选中文字后按 `Alt + Q` 可划词翻译，按 `Alt + W` 可框选屏幕区域并识别后翻译。v1.2.0 新安装默认推荐自备 API Key 的云端 OCR；Windows OCR 与 PP-OCRv6 Small 本地插件作为显式可选的离线替代。升级保留用户原有引擎选择，已发布 v1.0.0 的默认引擎仍为 Windows OCR。
 
@@ -8,12 +8,12 @@ QuickTranslate 是一个面向 Windows 11 的本地轻量级中英文划词与 O
 
 ## 安装正式版（普通用户）
 
-支持 Windows x64。普通用户不需要安装 Git、Node.js、Rust 或 Visual Studio Build Tools。使用 PowerShell 执行以下命令即可下载、校验并运行 `v1.7.0` 安装程序；已有版本可覆盖升级，升级前请备份设置、历史和生词本：
+支持 Windows x64。普通用户不需要安装 Git、Node.js、Rust 或 Visual Studio Build Tools。使用 PowerShell 执行以下命令即可下载、校验并运行 `v1.7.1` 安装程序；已有版本可覆盖升级，升级前请备份设置、历史和生词本：
 
 ```powershell
-$installer = Join-Path $env:TEMP "QuickTranslate_1.7.0_x64-setup.exe"
-Invoke-WebRequest "https://github.com/MYPoems/QuickTranslate/releases/download/v1.7.0/QuickTranslate_1.7.0_x64-setup.exe" -OutFile $installer
-if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "A5D8109543DB43DE82994539017618E37FF1D90717B8155473FBC88F517D0D26") { Remove-Item -LiteralPath $installer -Force; throw "安装包校验失败，请勿运行" }
+$installer = Join-Path $env:TEMP "QuickTranslate_1.7.1_x64-setup.exe"
+Invoke-WebRequest "https://github.com/MYPoems/QuickTranslate/releases/download/v1.7.1/QuickTranslate_1.7.1_x64-setup.exe" -OutFile $installer
+if ((Get-FileHash $installer -Algorithm SHA256).Hash -ne "4349F065596580676F24612B6CC843D7A4E2FB37C6A7DE6DB377298BA8BBC86D") { Remove-Item -LiteralPath $installer -Force; throw "安装包校验失败，请勿运行" }
 Start-Process -FilePath $installer -Wait
 Remove-Item $installer -Force
 ```
@@ -130,10 +130,10 @@ npm run tauri dev
 
 ## 回滚到上一正式版
 
-仓库使用 Git 管理版本。需要回退本次更新时，可显式检出上一正式版 `v1.6.2`。请先保存或提交自己的改动，并备份用户数据，然后在仓库目录运行（仅回退源码，不卸载应用或恢复数据库）：
+仓库使用 Git 管理版本。需要回退本次更新时，可显式检出上一正式版 `v1.7.0`。请先保存或提交自己的改动，并备份用户数据，然后在仓库目录运行（仅回退源码，不卸载应用或恢复数据库）：
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\rollback-to-stable.ps1 -StableVersion v1.6.2
+powershell -ExecutionPolicy Bypass -File .\scripts\rollback-to-stable.ps1 -StableVersion v1.7.0
 ```
 
 脚本检测到未提交改动时会拒绝执行，避免误删文件；回滚后处于稳定标签的只读检出状态。需要回到开发主分支时运行：

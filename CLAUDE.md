@@ -7,8 +7,8 @@
 - **产品**：面向 Windows 11 x64 的轻量翻译工具（以中英文为主，源码已支持日、韩、法、德、西、俄），系统托盘常驻。默认 `Alt+Q` 划词翻译，`Alt+W` 框选 OCR；可自定义两组快捷键。应用本地管理设置、历史、词卡和插件，翻译仍取决于配置的模型服务；“本地应用”不意味着默认所有推理都离线。
 - **技术栈**：Tauri 2 + Rust/Tokio、Vanilla TypeScript + Vite + 原生 CSS、SQLite（rusqlite bundled）、Windows WebView2、Windows Credential Manager。保持小、快、事件驱动；不要为小修复引入前端框架、长期轮询、全局键盘钩子或常驻服务。
 - **版本锚点**：`main` 上最新的发布是 `v1.7.1`，标签打在 `release/v1.7.1`（PR #6）的合并提交上；`v1.7.0` 在 `c7c8851`。PR #1–#6 都已合并，对应的远端分支未删除，可以清理。远端是 [MYPoems/QuickTranslate](https://github.com/MYPoems/QuickTranslate)。接手时重新运行 `git status --short --branch`、`git log -5 --oneline`、`git tag --points-at HEAD`；不要假设本地 `main` 同步，也不要覆盖工作区已有改动。
-- **正式版**：[v1.7.1 Release](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.7.1)（2026-11-13 发布）是补丁版本，只修了启动后首次打开截图遮罩一闪就关的问题，见 [v1.7.1 发布说明](docs/releases/v1.7.1.md)；**它没有在任何机器上安装运行过**。[v1.7.0](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.7.0)（同日发布）一次性发布了迭代计划里原定分四版的内容，发布后在本机从 1.6.2 覆盖安装并做了验收，见 [本机安装验收](docs/V1.7.0-LOCAL-INSTALL.md)；v1.7.0 的发布说明写于验收之前，其中“没有安装运行过”的说法已经过时。写本文时本机安装的是 1.7.0。
-- **优先待办**：在安装版上验收 v1.7.1 的遮罩修复：重启应用后第一次按 `Alt+W`，遮罩应保持显示，Esc 能关闭，切到别的窗口时收起。这个问题（首次按键遮罩一闪就关）的原因已经用事件跟踪确认：遮罩窗口首次创建时焦点移入内部 WebView，窗口先后收到 `Focused(true)` 和 `Focused(false)` 而仍是前台窗口，旧的 `handle_ocr_focus_change` 把它当成离开。修复见 `popup_focus::should_hide_overlay_on_blur`，只在隔离调试构建里验证过。其次是 v1.7.0 验收里没覆盖的部分：框选识别与云端 OCR、朗读、设置页、悬浮窗的拖动缩放和点击外部收起、应用内更新路径。
+- **正式版**：[v1.7.1 Release](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.7.1)（2026-11-13 发布）是补丁版本，只修了启动后首次打开截图遮罩一闪就关的问题，见 [v1.7.1 发布说明](docs/releases/v1.7.1.md)；发布后在本机从 1.7.0 覆盖安装并用真实 `Alt+W` 验收了修复，见 [v1.7.1 本机安装验收](docs/V1.7.1-LOCAL-INSTALL.md)。发布说明写于验收之前，其中“没有安装运行过”的说法已经过时。[v1.7.0](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.7.0)（同日发布）一次性发布了迭代计划里原定分四版的内容，发布后在本机从 1.6.2 覆盖安装并做了验收，见 [本机安装验收](docs/V1.7.0-LOCAL-INSTALL.md)；v1.7.0 的发布说明写于验收之前，其中“没有安装运行过”的说法已经过时。写本文时本机安装的是 1.7.1。
+- **优先待办**：没有已知的未修复问题。启动后首次按 `Alt+W` 遮罩一闪就关的问题已在 v1.7.1 修复并在安装版上验收（原因：遮罩窗口首次创建时焦点移入内部 WebView，窗口先后收到 `Focused(true)` 和 `Focused(false)` 而仍是前台窗口；修复见 `popup_focus::should_hide_overlay_on_blur`）。剩下的是两次验收都没覆盖的部分：框选识别与云端 OCR、朗读、设置页、悬浮窗的拖动缩放和点击外部收起、应用内更新路径、遮罩在 Win 键 / Alt+Tab / 锁屏下的表现。
 - **历史问题**：Word/Excel 划词“未检测到选中文字”的根因与修复见第 6 节，已随 1.7.0 发布，并在安装后的 1.7.0 上用真实 `Alt+Q` 在记事本、Word、Excel 里验证通过。
 - **操作授权**：分析请求先诊断；明确要求修复才改源码。改源码、构建、替换本机安装、推送、公开 Release 是不同操作，按当前用户授权执行。不要把过去授权当成持续授权。现有用户数据、凭据和未提交改动都要保留。
 
@@ -132,7 +132,7 @@ try {
 
 ## 7. 本机替换、回滚、正式发布
 
-**v1.7.1 的发布物**：`QuickTranslate_1.7.1_x64-setup.exe`，19,653,440 字节，SHA-256 `4349F065596580676F24612B6CC843D7A4E2FB37C6A7DE6DB377298BA8BBC86D`。Release 同时含 `.exe.sig`、`SHA256SUMS.txt`、`latest.json`。这些是该版固定值，不得用于核对未来新构建。发布后是否已匿名重下复核，以 Release 页面和会话记录为准，本文写于发布之前。
+**v1.7.1 的发布物**：`QuickTranslate_1.7.1_x64-setup.exe`，19,653,440 字节，SHA-256 `4349F065596580676F24612B6CC843D7A4E2FB37C6A7DE6DB377298BA8BBC86D`。Release 同时含 `.exe.sig`、`SHA256SUMS.txt`、`latest.json`。这些是该版固定值，不得用于核对未来新构建。发布后已匿名重下四项并核对：哈希与 `SHA256SUMS.txt` 一致，`latest.json` 的版本、下载地址和签名与该包一致，`/releases/latest/download/latest.json` 指向 1.7.1，对下载回来的包跑 `verify_release_artifact` 通过。main CI [43486378860](https://github.com/MYPoems/QuickTranslate/actions/runs/43486378860)、标签构建 [43486437607](https://github.com/MYPoems/QuickTranslate/actions/runs/43486437607) 通过。
 
 **v1.7.0 已核实的发布物**：`QuickTranslate_1.7.0_x64-setup.exe`，19,652,373 字节，SHA-256 `A5D8109543DB43DE82994539017618E37FF1D90717B8155473FBC88F517D0D26`。Release 同时含 `.exe.sig`、`SHA256SUMS.txt`、`latest.json`。这些是该版固定值，不得用于核对未来新构建。发布后已匿名重下四项并核对：哈希与 `SHA256SUMS.txt` 一致，`latest.json` 的版本、下载地址和签名与该包一致，`/releases/latest/download/latest.json` 指向 1.7.0，对下载回来的包跑 `verify_release_artifact` 通过。main CI [43434819116](https://github.com/MYPoems/QuickTranslate/actions/runs/43434819116)、标签构建 [43434859540](https://github.com/MYPoems/QuickTranslate/actions/runs/43434859540) 通过。发布后在本机覆盖安装了这个包，见 [本机安装验收](docs/V1.7.0-LOCAL-INSTALL.md)。
 
@@ -146,7 +146,7 @@ try {
 
 ## 8. 剩余验收、路线与资料
 
-- **发布记录未覆盖**：v1.7.0 的本机验收覆盖了升级的数据保留和真实 `Alt+Q` 取词，没有覆盖的部分列在 [本机安装验收](docs/V1.7.0-LOCAL-INSTALL.md) 末尾。拖动位移和边角缩放、干净 Windows 用户安装、不同缩放比例/多屏、云端 OCR/朗读的生产延迟，从 1.6.2 起就没有测量过。
-- **后续优先顺序建议**：路线、每项的状态和未验证的部分都在 [迭代计划](docs/ITERATION-PLAN.md)（第 12 节是进度）。计划里的源码条目已随 v1.7.0 发布，接下来先处理第 1 节的优先待办，再考虑新功能。未做的工程项：`vocabulary.ts` / `settings.ts` 拆分、界面截图基线进 CI、原生回归扩展、性能度量。保持两种离线 OCR 为用户显式选项，不承诺商业签名或服务商 SLA。
-- **阅读索引**：[README（安装与用户入口）](README.md) · [版本演进](CHANGELOG.md) · [迭代计划与进度](docs/ITERATION-PLAN.md) · [v1.7.1 发布说明](docs/releases/v1.7.1.md) · [v1.7.0 发布说明](docs/releases/v1.7.0.md) · [v1.7.0 本机安装验收](docs/V1.7.0-LOCAL-INSTALL.md) · [v1.6.2 发布说明](docs/releases/v1.6.2.md) · [v1.6.2 本机安装记录](docs/V1.6.2-LOCAL-INSTALL.md) · [收藏弹层 QA](docs/COLLECTOR-UI-QA.md) · [未固定拖动 QA](docs/POPUP-UNPINNED-DRAG-QA.md) · [更新迁移](docs/UPDATES.md) · [生词本规则](docs/VOCABULARY.md) · [插件来源与许可](docs/SPEECH-PLUGIN.md)。
+- **发布记录未覆盖**：v1.7.0 的本机验收覆盖了升级的数据保留和真实 `Alt+Q` 取词，v1.7.1 的覆盖了遮罩修复；没有覆盖的部分列在两份验收记录（[v1.7.0](docs/V1.7.0-LOCAL-INSTALL.md)、[v1.7.1](docs/V1.7.1-LOCAL-INSTALL.md)）末尾。拖动位移和边角缩放、干净 Windows 用户安装、不同缩放比例/多屏、云端 OCR/朗读的生产延迟，从 1.6.2 起就没有测量过。
+- **后续优先顺序建议**：路线、每项的状态和未验证的部分都在 [迭代计划](docs/ITERATION-PLAN.md)（第 12 节是进度）。计划里的源码条目已随 v1.7.0 发布，接下来先补第 1 节列出的未覆盖验收，再考虑新功能。未做的工程项：`vocabulary.ts` / `settings.ts` 拆分、界面截图基线进 CI、原生回归扩展、性能度量。保持两种离线 OCR 为用户显式选项，不承诺商业签名或服务商 SLA。
+- **阅读索引**：[README（安装与用户入口）](README.md) · [版本演进](CHANGELOG.md) · [迭代计划与进度](docs/ITERATION-PLAN.md) · [v1.7.1 发布说明](docs/releases/v1.7.1.md) · [v1.7.0 发布说明](docs/releases/v1.7.0.md) · [v1.7.1 本机安装验收](docs/V1.7.1-LOCAL-INSTALL.md) · [v1.7.0 本机安装验收](docs/V1.7.0-LOCAL-INSTALL.md) · [v1.6.2 发布说明](docs/releases/v1.6.2.md) · [v1.6.2 本机安装记录](docs/V1.6.2-LOCAL-INSTALL.md) · [收藏弹层 QA](docs/COLLECTOR-UI-QA.md) · [未固定拖动 QA](docs/POPUP-UNPINNED-DRAG-QA.md) · [更新迁移](docs/UPDATES.md) · [生词本规则](docs/VOCABULARY.md) · [插件来源与许可](docs/SPEECH-PLUGIN.md)。
 - **交付口径**：清楚区分改了什么、运行了哪些测试、用的是哪个构建/窗口、哪些需要用户或目标环境复核。源代码检查、单元测试、浏览器 fixture、原生 UI、覆盖安装、公开下载与真实云端运行是不同证据。

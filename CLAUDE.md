@@ -7,9 +7,9 @@
 - **产品**：面向 Windows 11 x64 的轻量翻译工具（以中英文为主，源码已支持日、韩、法、德、西、俄），系统托盘常驻。默认 `Alt+Q` 划词翻译，`Alt+W` 框选 OCR；可自定义两组快捷键。应用本地管理设置、历史、词卡和插件，翻译仍取决于配置的模型服务；“本地应用”不意味着默认所有推理都离线。
 - **技术栈**：Tauri 2 + Rust/Tokio、Vanilla TypeScript + Vite + 原生 CSS、SQLite（rusqlite bundled）、Windows WebView2、Windows Credential Manager。保持小、快、事件驱动；不要为小修复引入前端框架、长期轮询、全局键盘钩子或常驻服务。
 - **版本锚点**：`main` 和 `v1.7.0` 标签指向合并提交 `c7c8851`，这是写本文时的最新发布。分支 `codex/collector-ui-fix`（PR #1）、`iteration/plan-2026-11`（PR #2）、`release/v1.7.0`（PR #3）都已合并，远端分支未删除，可以清理。远端是 [MYPoems/QuickTranslate](https://github.com/MYPoems/QuickTranslate)。接手时重新运行 `git status --short --branch`、`git log -5 --oneline`、`git tag --points-at HEAD`；不要假设本地 `main` 同步，也不要覆盖工作区已有改动。
-- **正式版**：[v1.7.0 Release](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.7.0)（2026-11-13 发布，非草稿、非预发行、是 Latest）。它一次性发布了迭代计划里原定分四版的内容，逐项见 [v1.7.0 发布说明](docs/releases/v1.7.0.md)。**这个版本没有在任何机器上安装运行过**：本机仍是 1.6.2，应用内更新现在会把 1.7.0 推给所有已安装用户。
-- **优先待办**：v1.7.0 的真机验收。按优先级：从 1.6.2 覆盖安装或走应用内更新，确认历史拆表和旧 Key 认领在真实数据上正确、设置和词库保留；真实 `Alt+Q` 在 Word/Excel/记事本/浏览器里取词；对真实服务测试流式翻译、缩放后的截图识别、朗读；悬浮窗的原生拖动、缩放和失焦收起。发现问题要快，1.7.0 已经在向用户推送。
-- **历史问题**：Word/Excel 划词“未检测到选中文字”的根因与修复见第 6 节，已随 1.7.0 发布，但只在仓库的取词驱动上验证过，没有在完整应用里按真实快捷键验收。
+- **正式版**：[v1.7.0 Release](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.7.0)（2026-11-13 发布，非草稿、非预发行、是 Latest）。它一次性发布了迭代计划里原定分四版的内容，逐项见 [v1.7.0 发布说明](docs/releases/v1.7.0.md)。发布后当天在本机从 1.6.2 覆盖安装并做了验收，结果和没有覆盖到的部分见 [本机安装验收](docs/V1.7.0-LOCAL-INSTALL.md)；发布说明写于验收之前，其中“没有安装运行过”的说法已经过时。
+- **优先待办**：应用启动后第一次按 `Alt+W`，选区遮罩一闪就关闭，第二次才正常（见验收记录的“发现的问题”）。相关代码自 1.6.2 起未改，很可能是旧问题，没有在 1.6.2 上实测；推测是遮罩窗口首次创建时 WebView 初始化造成的临时失焦被 `handle_ocr_focus_change` 当成离开。未修复，修之前先确认原因。其次是验收里没覆盖的部分：框选识别与云端 OCR、朗读、设置页、悬浮窗的拖动缩放和点击外部收起、应用内更新路径。
+- **历史问题**：Word/Excel 划词“未检测到选中文字”的根因与修复见第 6 节，已随 1.7.0 发布，并在安装后的 1.7.0 上用真实 `Alt+Q` 在记事本、Word、Excel 里验证通过。
 - **操作授权**：分析请求先诊断；明确要求修复才改源码。改源码、构建、替换本机安装、推送、公开 Release 是不同操作，按当前用户授权执行。不要把过去授权当成持续授权。现有用户数据、凭据和未提交改动都要保留。
 
 ## 2. 目录和调用边界
@@ -132,9 +132,9 @@ try {
 
 ## 7. 本机替换、回滚、正式发布
 
-**v1.7.0 已核实的发布物**：`QuickTranslate_1.7.0_x64-setup.exe`，19,652,373 字节，SHA-256 `A5D8109543DB43DE82994539017618E37FF1D90717B8155473FBC88F517D0D26`。Release 同时含 `.exe.sig`、`SHA256SUMS.txt`、`latest.json`。这些是该版固定值，不得用于核对未来新构建。发布后已匿名重下四项并核对：哈希与 `SHA256SUMS.txt` 一致，`latest.json` 的版本、下载地址和签名与该包一致，`/releases/latest/download/latest.json` 指向 1.7.0，对下载回来的包跑 `verify_release_artifact` 通过。main CI [43434819116](https://github.com/MYPoems/QuickTranslate/actions/runs/43434819116)、标签构建 [43434859540](https://github.com/MYPoems/QuickTranslate/actions/runs/43434859540) 通过。**下载和验签都通过不等于安装通过**：这个包没有在任何机器上装过。
+**v1.7.0 已核实的发布物**：`QuickTranslate_1.7.0_x64-setup.exe`，19,652,373 字节，SHA-256 `A5D8109543DB43DE82994539017618E37FF1D90717B8155473FBC88F517D0D26`。Release 同时含 `.exe.sig`、`SHA256SUMS.txt`、`latest.json`。这些是该版固定值，不得用于核对未来新构建。发布后已匿名重下四项并核对：哈希与 `SHA256SUMS.txt` 一致，`latest.json` 的版本、下载地址和签名与该包一致，`/releases/latest/download/latest.json` 指向 1.7.0，对下载回来的包跑 `verify_release_artifact` 通过。main CI [43434819116](https://github.com/MYPoems/QuickTranslate/actions/runs/43434819116)、标签构建 [43434859540](https://github.com/MYPoems/QuickTranslate/actions/runs/43434859540) 通过。发布后在本机覆盖安装了这个包，见 [本机安装验收](docs/V1.7.0-LOCAL-INSTALL.md)。
 
-- **构建**：同步 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json` 的应用版本；维护 `CHANGELOG.md`、`docs/releases/vX.Y.Z.md` 和 README 安装指引。受控环境使用 `./scripts/build-release.ps1`，脚本要求配置 `TAURI_SIGNING_PRIVATE_KEY`（私钥或文件路径，密码由 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 提供），执行检查、NSIS 打包和验签，产物落在 `artifacts/vX.Y.Z/`。注意该脚本需要 PowerShell 7（用了 `utf8NoBOM` 等语法），在 Windows PowerShell 5.1 下会解析失败；5.1 环境里按脚本的步骤逐项执行，不要为此改脚本。签名私钥不在仓库里，位置问用户，不要写进仓库。不要复制、打印、提交或上传私钥；不要为发布擅自配置 CI secrets、重置公钥或关闭 `requireSignedVersion`。
+- **构建**：同步 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock`、`src-tauri/tauri.conf.json` 的应用版本；维护 `CHANGELOG.md`、`docs/releases/vX.Y.Z.md` 和 README 安装指引。受控环境使用 `./scripts/build-release.ps1`，脚本要求配置 `TAURI_SIGNING_PRIVATE_KEY`（私钥或文件路径，密码由 `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 提供），执行检查、NSIS 打包和验签，产物落在 `artifacts/vX.Y.Z/`。注意 `build-release.ps1` 和 `install-local.ps1` 都需要 PowerShell 7（无 BOM 的中文字符串、`utf8NoBOM`），在 Windows PowerShell 5.1 下会解析失败；5.1 环境里按构建脚本的步骤逐项执行，安装脚本用加了 BOM 的副本运行，不要为此改脚本逻辑。签名私钥不在仓库里，位置问用户，不要写进仓库。不要复制、打印、提交或上传私钥；不要为发布擅自配置 CI secrets、重置公钥或关闭 `requireSignedVersion`。
 - **验签**：`verify_release_artifact` 是 ignored Rust 测试；给当前会话设置 `QUICKTRANSLATE_VERIFY_ARTIFACT` / `QUICKTRANSLATE_VERIFY_SIGNATURE` 指向对应 EXE / SIG，然后运行 `cargo test --locked --manifest-path src-tauri/Cargo.toml verify_release_artifact -- --ignored`，结束后清环境变量。它核验配置公钥、签名绑定版本及篡改包拒绝；Tauri 更新签名**不是** Windows 商业 Authenticode 签名，SmartScreen 仍可能提示未知发布者。
 - **本机替换**：只在用户明确要求时运行 `./scripts/install-local.ps1 -Installer <已验证的安装包路径> -ExpectedSha256 <已验证的64位哈希>`（尖括号为占位符，实际路径需引号）。只停止准确的已安装进程路径，备份后才安装。验收重启后的实际路径和版本，并核对设置、窗口尺寸、历史、词库、插件保留。可用 `scripts/audit-history.py`、`scripts/audit-vocabulary.py` 作只读比较，不输出内容。NSIS 可能把二进制内部 Tauri bundle marker 从 `UNK` 改为 `NSS`，安装后 EXE 的哈希不等于原始构建 EXE；先核实差异，不修改二进制来凑哈希。
 - **源码回滚**：`./scripts/rollback-to-stable.ps1 -StableVersion v1.6.2` 会拒绝脏工作区并 detached checkout 指定标签；脚本默认参数仍为 `v1.0.0`，必须明确选择。不会还原安装或数据。应用回滚需另外保留当前数据、确认旧 Schema 兼容、验证历史安装包和还原计划；不能靠 git checkout 恢复用户数据库。
@@ -144,7 +144,7 @@ try {
 
 ## 8. 剩余验收、路线与资料
 
-- **发布记录未覆盖**：v1.7.0 完全没有真机验收，见第 1 节的优先待办。更早的 v1.6.2 也未量化拖动位移和边角缩放，未检查干净 Windows 用户安装、不同缩放比例/多屏、真实 Office 矩阵，真实云端 OCR/朗读的生产延迟也没有测量；这些在 1.7.0 同样没做。
-- **后续优先顺序建议**：路线、每项的状态和未验证的部分都在 [迭代计划](docs/ITERATION-PLAN.md)（第 12 节是进度）。计划里的源码条目已随 v1.7.0 发布，接下来先做真机验收（见第 1 节），再考虑新功能。未做的工程项：`vocabulary.ts` / `settings.ts` 拆分、界面截图基线进 CI、原生回归扩展、性能度量。保持两种离线 OCR 为用户显式选项，不承诺商业签名或服务商 SLA。
-- **阅读索引**：[README（安装与用户入口）](README.md) · [版本演进](CHANGELOG.md) · [迭代计划与进度](docs/ITERATION-PLAN.md) · [v1.7.0 发布说明](docs/releases/v1.7.0.md) · [v1.6.2 发布说明](docs/releases/v1.6.2.md) · [本机安装记录](docs/V1.6.2-LOCAL-INSTALL.md) · [收藏弹层 QA](docs/COLLECTOR-UI-QA.md) · [未固定拖动 QA](docs/POPUP-UNPINNED-DRAG-QA.md) · [更新迁移](docs/UPDATES.md) · [生词本规则](docs/VOCABULARY.md) · [插件来源与许可](docs/SPEECH-PLUGIN.md)。
+- **发布记录未覆盖**：v1.7.0 的本机验收覆盖了升级的数据保留和真实 `Alt+Q` 取词，没有覆盖的部分列在 [本机安装验收](docs/V1.7.0-LOCAL-INSTALL.md) 末尾。拖动位移和边角缩放、干净 Windows 用户安装、不同缩放比例/多屏、云端 OCR/朗读的生产延迟，从 1.6.2 起就没有测量过。
+- **后续优先顺序建议**：路线、每项的状态和未验证的部分都在 [迭代计划](docs/ITERATION-PLAN.md)（第 12 节是进度）。计划里的源码条目已随 v1.7.0 发布，接下来先处理第 1 节的优先待办，再考虑新功能。未做的工程项：`vocabulary.ts` / `settings.ts` 拆分、界面截图基线进 CI、原生回归扩展、性能度量。保持两种离线 OCR 为用户显式选项，不承诺商业签名或服务商 SLA。
+- **阅读索引**：[README（安装与用户入口）](README.md) · [版本演进](CHANGELOG.md) · [迭代计划与进度](docs/ITERATION-PLAN.md) · [v1.7.0 发布说明](docs/releases/v1.7.0.md) · [v1.7.0 本机安装验收](docs/V1.7.0-LOCAL-INSTALL.md) · [v1.6.2 发布说明](docs/releases/v1.6.2.md) · [v1.6.2 本机安装记录](docs/V1.6.2-LOCAL-INSTALL.md) · [收藏弹层 QA](docs/COLLECTOR-UI-QA.md) · [未固定拖动 QA](docs/POPUP-UNPINNED-DRAG-QA.md) · [更新迁移](docs/UPDATES.md) · [生词本规则](docs/VOCABULARY.md) · [插件来源与许可](docs/SPEECH-PLUGIN.md)。
 - **交付口径**：清楚区分改了什么、运行了哪些测试、用的是哪个构建/窗口、哪些需要用户或目标环境复核。源代码检查、单元测试、浏览器 fixture、原生 UI、覆盖安装、公开下载与真实云端运行是不同证据。

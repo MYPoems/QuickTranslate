@@ -149,9 +149,16 @@ struct Extras {
 
 impl Extras {
     fn for_model(base_url: &str, model: &str) -> Self {
+        let pixel_bounds = compat::ocr_pixel_bounds(base_url, model);
         Self {
-            enable_thinking: compat::dialect(base_url, model, 0.0).enable_thinking,
-            pixel_bounds: compat::ocr_pixel_bounds(base_url, model),
+            // A dedicated text-extraction model does not deliberate, so there is nothing
+            // to switch off; it keeps the request it has always been sent.
+            enable_thinking: if pixel_bounds.is_some() {
+                None
+            } else {
+                compat::dialect(base_url, model, 0.0).enable_thinking
+            },
+            pixel_bounds,
         }
     }
 }
@@ -295,6 +302,8 @@ mod tests {
         let image = &ocr["messages"][0]["content"][0];
         assert_eq!(image["min_pixels"], 3072);
         assert_eq!(image["max_pixels"], 8_388_608);
+        // It is asked exactly as before: the thinking switch means nothing to it.
+        assert!(ocr.get("enable_thinking").is_none());
 
         // qwen4-max answered "min_pixels must be greater than or equal to 4096" to them.
         for model in ["qwen4-max", "qwen3.8-flash"] {

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- 新图标：一个同时是放大镜的“Q”，镜片里两行文字（白色是原文，琥珀色是译文），底色用应用界面的靛蓝。此前用的是 Tauri 的默认图标。图标源文件是 `src-tauri/icons/icon.svg`。
+- 阿里云百炼：请求里带上 `enable_thinking: false`。百炼目前带免费额度的新模型（如 `qwen3.8-flash`、`qwen4-max`）默认先“深度思考”再回答，查词和截图识别会因此变慢并多消耗 Token。模型不接受这个开关时自动去掉重试，并在本次运行内记住。
+- Claude：对 Claude 模型不再发送 `temperature`。Claude 4.7 及之后的模型对低于 1 的 `temperature` 返回 HTTP 400，此前无法通过 OpenAI 兼容接口使用。
+- 设置里的服务商预设：阿里云百炼的默认模型由 `qwen-turbo` 改为 `qwen3.8-flash`；新增 Anthropic Claude（`https://api.anthropic.com/v1`，`claude-haiku-5-5`）。已保存的设置不受影响。
+
 ## 1.7.1 - 2026-11-13
 
 - 修复应用启动后第一次按截图快捷键时，选区遮罩出现一瞬间就自己关闭、要按第二次才能框选的问题：遮罩窗口首次创建时焦点会从窗口移到内部的 WebView，这次内部转移被当成了离开遮罩。现在只有别的窗口到了前台才收起。

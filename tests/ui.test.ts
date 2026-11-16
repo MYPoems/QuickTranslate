@@ -338,6 +338,15 @@ test("settings show the key saved for the address in the form and test cloud OCR
     await new Promise(resolve => setTimeout(resolve, 320)); await settle();
     assert.equal(calls.filter(call => call.command === "get_key_status").at(-1)?.args.baseUrl, "https://api.deepseek.com/v1");
     assert.match(element("#key-status").textContent || "", /已保存这个服务地址/);
+    // Each preset fills in the address and a model that is current for that service.
+    for (const [name, baseUrl, model] of [["Anthropic Claude", "https://api.anthropic.com/v1", "claude-haiku-5-5"], ["阿里云百炼", "https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen3.8-flash"]]) {
+      provider.value = name; provider.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+      assert.equal(provider.value, name);
+      assert.equal(element<HTMLInputElement>('[name="baseUrl"]').value, baseUrl);
+      assert.equal(element<HTMLInputElement>('[name="model"]').value, model);
+    }
+    provider.value = "DeepSeek"; provider.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    await new Promise(resolve => setTimeout(resolve, 320)); await settle();
 
     element("#test-cloud-ocr").click(); await settle();
     assert.ok(calls.some(call => call.command === "test_cloud_ocr"));

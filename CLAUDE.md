@@ -8,6 +8,7 @@
 - **技术栈**：Tauri 2 + Rust/Tokio、Vanilla TypeScript + Vite + 原生 CSS、SQLite（rusqlite bundled）、Windows WebView2、Windows Credential Manager。保持小、快、事件驱动；不要为小修复引入前端框架、长期轮询、全局键盘钩子或常驻服务。
 - **版本锚点**：`main` 上最新的发布是 `v1.7.1`，标签打在 `release/v1.7.1`（PR #6）的合并提交上；`v1.7.0` 在 `c7c8851`。PR #1–#6 都已合并，对应的远端分支未删除，可以清理。远端是 [MYPoems/QuickTranslate](https://github.com/MYPoems/QuickTranslate)。接手时重新运行 `git status --short --branch`、`git log -5 --oneline`、`git tag --points-at HEAD`；不要假设本地 `main` 同步，也不要覆盖工作区已有改动。
 - **正式版**：[v1.7.1 Release](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.7.1)（2026-11-13 发布）是补丁版本，只修了启动后首次打开截图遮罩一闪就关的问题，见 [v1.7.1 发布说明](docs/releases/v1.7.1.md)；发布后在本机从 1.7.0 覆盖安装并用真实 `Alt+W` 验收了修复，见 [v1.7.1 本机安装验收](docs/V1.7.1-LOCAL-INSTALL.md)。[v1.7.0](https://github.com/MYPoems/QuickTranslate/releases/tag/v1.7.0)（同日发布）一次性发布了迭代计划里原定分四版的内容，发布后在本机从 1.6.2 覆盖安装并做了验收，见 [本机安装验收](docs/V1.7.0-LOCAL-INSTALL.md)。两版的发布说明、公开的 Release 页面和 `latest.json` 里的说明都在验收后更新过，“验证情况”一节注明了哪些是发布后补做的。写本文时本机安装的是 1.7.1。
+- **未发布的改动**：`main` 上在 v1.7.1 之后有新图标、对阿里云百炼和 Claude 的请求兼容（见第 3 节）以及服务商预设的更新，见 `CHANGELOG.md` 的 Unreleased。它们没有打包发布，本机安装的 1.7.1 没有这些改动；兼容规则没有对真实服务验证过。
 - **优先待办**：没有已知的未修复问题。启动后首次按 `Alt+W` 遮罩一闪就关的问题已在 v1.7.1 修复并在安装版上验收（原因：遮罩窗口首次创建时焦点移入内部 WebView，窗口先后收到 `Focused(true)` 和 `Focused(false)` 而仍是前台窗口；修复见 `popup_focus::should_hide_overlay_on_blur`）。剩下的是两次验收都没覆盖的部分：框选识别与云端 OCR、朗读、设置页、悬浮窗的拖动缩放和点击外部收起、应用内更新路径、遮罩在 Win 键 / Alt+Tab / 锁屏下的表现。
 - **历史问题**：Word/Excel 划词“未检测到选中文字”的根因与修复见第 6 节，已随 1.7.0 发布，并在安装后的 1.7.0 上用真实 `Alt+Q` 在记事本、Word、Excel 里验证通过。
 - **操作授权**：分析请求先诊断；明确要求修复才改源码。改源码、构建、替换本机安装、推送、公开 Release 是不同操作，按当前用户授权执行。不要把过去授权当成持续授权。现有用户数据、凭据和未提交改动都要保留。
@@ -18,8 +19,9 @@
 | --- | --- |
 | 运行入口、托盘、快捷键、窗口事件 | `src-tauri/src/main.rs`、`lib.rs`、`tray.rs`；`main.rs` 的 `--speech-worker` 是内部进程入口，`--vocabulary` 可从应用入口打开生词本 |
 | 前端窗口路由、类型和样式 | `src/main.ts` 按 Tauri 窗口标签加载 `popup` / `settings` / `history` / `vocabulary` / `ocr`；`src/types.ts`、`src/appearance.ts`、`src/styles/global.css` |
+| 应用图标 | 源文件 `src-tauri/icons/icon.svg`，同目录其余文件都由 `npx tauri icon src-tauri/icons/icon.svg` 生成；该命令还会生成 `android/`、`ios/` 和 `64x64.png`，没有被引用，不提交。托盘、窗口和安装包用的都是这一套 |
 | IPC / 安全 | `src-tauri/src/commands/`、`lib.rs` 的 invoke 注册、`src-tauri/build.rs` 的 `COMMANDS` 清单、`src-tauri/capabilities/<窗口>-commands.json`（每个窗口只授权它实际调用的命令）、`tests/ipc.test.ts`、`src-tauri/tauri.conf.json` 的窗口配置、CSP、资源范围 |
-| 划词、翻译与错误 | `src-tauri/src/app.rs`、`platform/mod.rs`、`platform/windows/{selection,clipboard}.rs`、`translation/`、`providers/openai_compatible.rs`、`errors.rs` |
+| 划词、翻译与错误 | `src-tauri/src/app.rs`、`platform/mod.rs`、`platform/windows/{selection,clipboard}.rs`、`translation/`、`providers/openai_compatible.rs`、`providers/compat.rs`（各服务对请求字段的不同要求）、`errors.rs` |
 | 悬浮窗行为与定位 | `src/popup/`、`src-tauri/src/window/mod.rs`、`window_state.rs`、`popup_focus.rs`、`platform/{placement.rs,windows/cursor.rs}` |
 | OCR | `src/ocr/`、`src-tauri/src/commands/ocr.rs`、`platform/windows/ocr.rs`、`ocr/{cloud,plugin}.rs` |
 | 朗读 | `src/speech/{controls,reader,stream}.ts`、`src-tauri/src/commands/speech.rs`、`speech.rs`、`speech_{cloud,plugin,worker,cache}.rs` |
@@ -37,8 +39,9 @@
 - 句子和段落以流式请求（`stream: true`）翻译，增量经 `translation-delta` 事件（最多每 50 ms 一次，带 `requestId`）送到悬浮窗；超时是“30 秒内开始响应 + 段间 30 秒空闲 + 总上限 600 秒”。服务不支持流式或流在出字前失败时退回一次性请求；单词的结构化释义始终一次性返回。增量只用于显示，写入缓存和历史的是完整结果。
 - 语言：`translation/language.rs` 按文字系统和常用词判断中、英、日、韩、法、德、西、俄，短文本可能判错；`TranslationPreferences`（设置里的可选块，Schema 仍为 5）保存“我阅读的语言”、另一种语言、术语表（最多 200 条）和附加要求（最多 600 字）。只把出现在原文里的术语发给模型。悬浮窗菜单可为当前文本临时指定目标语言。没有对应音色的语言不显示朗读。API、取词、翻译空结果应分别诊断。新请求取消旧请求，`request_id` 防止旧结果覆盖新界面；取消异步等待不等于中止已开始的阻塞系统调用。
 - 缓存失败不应阻断翻译展示，翻译缓存最多 1000 条；支持重译绕过缓存。历史是独立的表 `translation_history`（最近 5000 条，收藏不计入也不被清理），可搜索、收藏、复制、删除和清空（破坏性操作需确认，清空默认保留收藏）；清理缓存不动历史。从历史打开旧译文只读本地结果，不重新调用模型。旧库首次打开时自动拆分。
-- 默认翻译配置是 `https://api.openai.com/v1` + `gpt-4.1-mini`，不是已配置凭据。设置提供 OpenAI、阿里云百炼、DeepSeek、自定义及 Ollama / LM Studio 预设。Base URL 填 API 根路径，不追加完整 `/chat/completions`；实际模型权限和额度由服务商决定。远程使用 HTTPS，普通 HTTP 仅允许本机回环。回环模型可以无 Key；不要把某个用户私有配置写成项目默认。
+- 默认翻译配置是 `https://api.openai.com/v1` + `gpt-4.1-mini`，不是已配置凭据。设置提供 OpenAI、阿里云百炼、DeepSeek、自定义及 Ollama / LM Studio 预设。Base URL 填 API 根路径，不追加完整 `/chat/completions`；实际模型权限和额度由服务商决定。设置里的预设只是填表的便利：阿里云百炼填 `qwen3.8-flash`，Anthropic Claude 填 `https://api.anthropic.com/v1` + `claude-haiku-5-5`；模型会过时，换预设时查服务商的现行列表，README 的“选哪个模型”一节记着查阅日期和来源。远程使用 HTTPS，普通 HTTP 仅允许本机回环。回环模型可以无 Key；不要把某个用户私有配置写成项目默认。
 - Provider 对 429、5xx、连接/超时错误有限重试，401 不应当作网络重试。遇到 429 先区分调用频率、账户额度和计费限制，不要一味增加重试。单个英文词会走结构化词义提示，和持久生词本的词卡生成是两条路径。翻译缓存键含文本、语言方向、Provider 名、Model、服务地址以及术语表和附加要求的摘要；改其中任何一项都不会命中旧译文。
+- 同是 OpenAI 兼容接口，各家对请求字段的要求不同，规则集中在 `providers/compat.rs`，翻译、云端 OCR、词卡生成三条请求路径都从这里取，不要在各处另写判断：Claude（地址是 `api.anthropic.com` 或模型名含 `claude`）不发 `temperature`，因为 4.7 起的模型对低于 1 的值返回 400；阿里云百炼（`dashscope*.aliyuncs.com`、`*.maas.aliyuncs.com`）发 `enable_thinking: false`，因为它的新模型默认先思考。模型用 400 拒绝这个开关时去掉它重试一次，成功就在进程内记住。这两条规则只有单元测试和回环服务测试，没有对真实的百炼或 Anthropic 接口验证过。
 
 ### OCR：云端优先，离线为显式替代
 

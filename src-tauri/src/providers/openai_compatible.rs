@@ -12,7 +12,7 @@ use crate::{
     },
 };
 
-use super::Translator;
+use super::{compat, Translator};
 
 #[derive(Debug, Clone)]
 pub struct ProviderConfig {
@@ -25,11 +25,24 @@ pub struct ProviderConfig {
 pub struct OpenAiCompatibleProvider {
     client: reqwest::Client,
     config: ProviderConfig,
+    /// Set by tests to exercise a dialect against a loopback server; otherwise the dialect
+    /// follows from the address and the model.
+    dialect: Option<compat::Dialect>,
 }
 
 impl OpenAiCompatibleProvider {
     pub fn new(client: reqwest::Client, config: ProviderConfig) -> Self {
-        Self { client, config }
+        Self {
+            client,
+            config,
+            dialect: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_dialect(mut self, dialect: compat::Dialect) -> Self {
+        self.dialect = Some(dialect);
+        self
     }
 
     fn endpoint(&self) -> String {
@@ -46,7 +59,12 @@ impl OpenAiCompatibleProvider {
 struct ChatRequest<'a> {
     model: &'a str,
     messages: [ChatMessage<'a>; 2],
-    temperature: f32,
+    /// Left out for services that reject it; see [`compat::dialect`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    temperature: Option<f32>,
+    /// Sent as `false` to services whose models would otherwise think first.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enable_thinking: Option<bool>,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     stream: bool,
 }
@@ -86,7 +104,8 @@ struct DictionaryResponse {
 impl Translator for OpenAiCompatibleProvider {
     async fn translate(&self, request: TranslationRequest) -> Result<TranslationResult, AppError> {
         let system_prompt = build_system_prompt(&request);
-        let body = ChatRequest {
+        let dialect = self.dialect();
+        let mut body = ChatRequest {
             model: &self.config.model,
             messages: [
                 ChatMessage {
@@ -98,41 +117,22 @@ impl Translator for OpenAiCompatibleProvider {
                     content: &request.text,
                 },
             ],
-            temperature: 0.1,
+            temperature: dialect.temperature,
+            enable_thinking: dialect.enable_thinking,
             stream: false,
         };
 
-        let mut attempt = 0;
-        let response = loop {
-            let mut request = self.client.post(self.endpoint()).json(&body);
-            if !self.config.api_key.is_empty() {
-                request = request.bearer_auth(&self.config.api_key);
+        let mut response = self.send(&body).await?;
+        if response.status() == StatusCode::BAD_REQUEST && body.enable_thinking.is_some() {
+            // A model that cannot answer without thinking refuses the switch. Ask it the
+            // plain way, and remember so that the next request does not ask twice.
+            body.enable_thinking = None;
+            let retried = self.send(&body).await?;
+            if retried.status().is_success() {
+                compat::remember_thinking_switch_refused(&self.config.base_url, &self.config.model);
             }
-            let outcome = request.send().await;
-
-            match outcome {
-                Ok(response) if is_retryable_status(response.status()) && attempt < MAX_RETRIES => {
-                    let delay = retry_delay(
-                        attempt,
-                        response
-                            .headers()
-                            .get(RETRY_AFTER)
-                            .and_then(|value| value.to_str().ok()),
-                    );
-                    attempt += 1;
-                    tokio::time::sleep(delay).await;
-                }
-                Err(error)
-                    if (error.is_timeout() || error.is_connect()) && attempt < MAX_RETRIES =>
-                {
-                    let delay = retry_delay(attempt, None);
-                    attempt += 1;
-                    tokio::time::sleep(delay).await;
-                }
-                Ok(response) => break response,
-                Err(error) => return Err(map_reqwest_error(error)),
-            }
-        };
+            response = retried;
+        }
 
         let status = response.status();
         if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
@@ -161,6 +161,50 @@ impl Translator for OpenAiCompatibleProvider {
     }
 }
 
+impl OpenAiCompatibleProvider {
+    fn dialect(&self) -> compat::Dialect {
+        self.dialect
+            .unwrap_or_else(|| compat::dialect(&self.config.base_url, &self.config.model, 0.1))
+    }
+
+    /// Sends one request, trying again after a rate limit, a server error, a timeout or a
+    /// failed connection.
+    async fn send(&self, body: &ChatRequest<'_>) -> Result<reqwest::Response, AppError> {
+        let mut attempt = 0;
+        let response = loop {
+            let mut request = self.client.post(self.endpoint()).json(body);
+            if !self.config.api_key.is_empty() {
+                request = request.bearer_auth(&self.config.api_key);
+            }
+            let outcome = request.send().await;
+
+            match outcome {
+                Ok(response) if is_retryable_status(response.status()) && attempt < MAX_RETRIES => {
+                    let delay = retry_delay(
+                        attempt,
+                        response
+                            .headers()
+                            .get(RETRY_AFTER)
+                            .and_then(|value| value.to_str().ok()),
+                    );
+                    attempt += 1;
+                    tokio::time::sleep(delay).await;
+                }
+                Err(error)
+                    if (error.is_timeout() || error.is_connect()) && attempt < MAX_RETRIES =>
+                {
+                    let delay = retry_delay(attempt, None);
+                    attempt += 1;
+                    tokio::time::sleep(delay).await;
+                }
+                Ok(response) => break response,
+                Err(error) => return Err(map_reqwest_error(error)),
+            }
+        };
+        Ok(response)
+    }
+}
+
 /// How long a streamed reply may take to begin, and how long it may pause between pieces.
 /// A long translation is no longer cut off by a limit on its total duration.
 const STREAM_START_TIMEOUT: Duration = Duration::from_secs(30);
@@ -184,6 +228,7 @@ impl OpenAiCompatibleProvider {
             return self.translate(request).await;
         }
         let system_prompt = build_system_prompt(&request);
+        let dialect = self.dialect();
         let body = ChatRequest {
             model: &self.config.model,
             messages: [
@@ -196,7 +241,8 @@ impl OpenAiCompatibleProvider {
                     content: &request.text,
                 },
             ],
-            temperature: 0.1,
+            temperature: dialect.temperature,
+            enable_thinking: dialect.enable_thinking,
             stream: true,
         };
         let mut builder = self
@@ -551,13 +597,51 @@ mod tests {
                         content: "u",
                     },
                 ],
-                temperature: 0.1,
+                temperature: Some(0.1),
+                enable_thinking: None,
                 stream,
             })
             .unwrap()
         };
         assert_eq!(request(true)["stream"], true);
         assert!(request(false).get("stream").is_none());
+        assert!(request(false).get("enable_thinking").is_none());
+    }
+
+    #[test]
+    fn a_request_carries_only_what_its_service_accepts() {
+        let body = |base: &str, model: &str| {
+            let dialect = compat::dialect(base, model, 0.1);
+            serde_json::to_value(ChatRequest {
+                model,
+                messages: [
+                    ChatMessage {
+                        role: "system",
+                        content: "s",
+                    },
+                    ChatMessage {
+                        role: "user",
+                        content: "u",
+                    },
+                ],
+                temperature: dialect.temperature,
+                enable_thinking: dialect.enable_thinking,
+                stream: false,
+            })
+            .unwrap()
+        };
+        let claude = body("https://api.anthropic.com/v1", "claude-haiku-5-5");
+        assert!(claude.get("temperature").is_none());
+        assert!(claude.get("enable_thinking").is_none());
+        let qwen = body(
+            "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "qwen3.8-flash",
+        );
+        assert_eq!(qwen["enable_thinking"], false);
+        assert!(qwen.get("temperature").is_some());
+        let openai = body("https://api.openai.com/v1", "gpt-4.1-mini");
+        assert!(openai.get("temperature").is_some());
+        assert!(openai.get("enable_thinking").is_none());
     }
 
     #[test]

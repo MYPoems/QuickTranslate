@@ -68,13 +68,38 @@ pub async fn generate(
         "word (the requested lowercase word), lemma (context-appropriate lowercase base form; do not silently change word), ipaUk and ipaUs (IPA strings or empty if unsure), partOfSpeech, definitions (1-6 short Chinese strings), contextMeaning (Chinese), examples (1-2 objects {english,chinese}), collocations (0-4 strings), quizzes (2 DIFFERENT objects). ",
         "Each quiz: meaningPrompt (English target word in a contextual question), options (4 distinct Chinese meanings, ONLY ONE unambiguously correct for this context), correctIndex (0-based), cloze (new natural English sentence with exactly ONE '____'; must NOT contain the word or lemma elsewhere), hint (Chinese meaning, no English answer), answer (exact lowercase word OR lemma appropriate to the blank). ",
         "No ambiguous near-synonym distractors, no trick questions, no full-sentence answers. If existingCard is supplied, preserve its taught meaning and use DIFFERENT valid quiz sentences. Do not fabricate IPA. Keep everything concise.");
-    let mut request=client.post(url).json(&json!({"model":settings.model,"messages":[{"role":"system","content":prompt},{"role":"user","content":json!({"word":word,"context":context,"existingCard":existing}).to_string()}],"temperature":0.2,"max_tokens":4000}));
-    if !key.is_empty() {
-        request = request.bearer_auth(key);
+    let mut body = json!({"model":settings.model,"messages":[{"role":"system","content":prompt},{"role":"user","content":json!({"word":word,"context":context,"existingCard":existing}).to_string()}],"max_tokens":4000});
+    // What this service accepts beyond the common fields; see `compat::dialect`.
+    let dialect = crate::providers::compat::dialect(&settings.base_url, &settings.model, 0.2);
+    if let Some(temperature) = dialect.temperature {
+        body["temperature"] = json!(temperature);
     }
-    let mut response = request.send().await.map_err(|_| {
-        AppError::Vocabulary("词卡请求超时或网络不可用；词条已保留，可手动重试".into())
-    })?;
+    if let Some(enabled) = dialect.enable_thinking {
+        body["enable_thinking"] = json!(enabled);
+    }
+    let send = |body: &Value| {
+        let mut request = client.post(url.clone()).json(body);
+        if !key.is_empty() {
+            request = request.bearer_auth(key);
+        }
+        request.send()
+    };
+    let unreachable =
+        |_| AppError::Vocabulary("词卡请求超时或网络不可用；词条已保留，可手动重试".into());
+    let mut response = send(&body).await.map_err(unreachable)?;
+    if response.status().as_u16() == 400 && body.get("enable_thinking").is_some() {
+        // The model refuses the thinking switch; ask again the plain way.
+        if let Some(fields) = body.as_object_mut() {
+            fields.remove("enable_thinking");
+        }
+        response = send(&body).await.map_err(unreachable)?;
+        if response.status().is_success() {
+            crate::providers::compat::remember_thinking_switch_refused(
+                &settings.base_url,
+                &settings.model,
+            );
+        }
+    }
     if matches!(response.status().as_u16(), 401 | 403) {
         return Err(AppError::InvalidApiKey);
     }

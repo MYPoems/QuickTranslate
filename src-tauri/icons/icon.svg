@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <!--
+    QuickTranslate application icon. The source for every file in this directory:
+    regenerate them with `npx tauri icon src-tauri/icons/icon.svg`.
+
+    A "Q" that is also a magnifying glass, for looking words up: the ring is the lens and the tail of the Q its handle.
+    Inside are two lines of text, the original in white and its translation in amber.
+    The indigo is the accent colour of the application's own interface.
+  -->
+  <defs>
+    <linearGradient id="plate" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#7A8FF7"/>
+      <stop offset="1" stop-color="#4553C4"/>
+    </linearGradient>
+  </defs>
+  <rect x="56" y="56" width="912" height="912" rx="212" fill="url(#plate)"/>
+  <g fill="none" stroke="#FFFFFF" stroke-width="96" stroke-linecap="round">
+    <circle cx="492" cy="476" r="232"/>
+    <path d="M664 648 L786 770"/>
+  </g>
+  <rect x="374" y="396" width="236" height="58" rx="29" fill="#FFFFFF"/>
+  <rect x="374" y="498" width="152" height="58" rx="29" fill="#FFC95C"/>
+</svg>

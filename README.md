@@ -48,7 +48,7 @@ Remove-Item $installer -Force
 - Windows 临时 `Ctrl + C` 选词：等快捷键松开后再复制，取词后恢复原剪贴板的文本（原内容为图片、文件等非文本时不改动）
 - 完全本地的语言判断和文本清洗（最多 5000 字符）；支持中、英、日、韩、法、德、西、俄，可设置“我阅读的语言”和译成的语言
 - 术语表与附加翻译要求：只发送出现在原文里的术语
-- OpenAI-compatible Provider（OpenAI、阿里云百炼、DeepSeek 与自定义端点预设）
+- OpenAI-compatible Provider（OpenAI、阿里云百炼、Anthropic Claude、DeepSeek 与自定义端点预设）
 - Ollama、LM Studio 本地模型预设，本机连接可不配置 API Key
 - API Key 保存到 Windows Credential Manager，不写入 JSON 或 SQLite；Key 与服务地址绑定，换服务商不会把原来的 Key 发到新地址，换回去也不用重填
 - SQLite 翻译缓存；缓存失败不影响正常展示
@@ -151,6 +151,24 @@ git switch main
 5. 点击“测试连接”，成功后保存。
 
 然后在 Notepad、Edge/Chrome 或 VS Code 中选中文字，按 `Alt + Q`。对于图片、视频或无法复制的界面，按 `Alt + W` 后拖动框选文字区域。
+
+### 选哪个模型（2026-11-16 查阅）
+
+翻译和云端 OCR 用的都是 OpenAI 兼容的对话接口，OCR 需要模型能看图。服务商的模型和免费额度变化很快，下表是查阅当天的情况，以服务商页面为准。
+
+| 用途 | 服务地址 | 模型 | 说明 |
+| --- | --- | --- | --- |
+| 翻译、查词 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen3.8-flash` | 快、便宜（输入 0.8 元、输出 2.7 元每百万 Token），也能看图 |
+| 翻译、查词 | 同上 | `qwen4-max` | 旗舰模型，更慢更贵（10 元、30 元） |
+| 云端 OCR | 同上 | `qwen3.5-ocr` | 专门的文字提取模型（0.5 元、2 元） |
+| 云端 OCR | 同上 | `qwen3.8-flash` 或 `qwen4-max` | 通用的视觉模型，也能提取文字 |
+| 翻译、OCR | `https://api.anthropic.com/v1` | `claude-haiku-5-5` | 需要 Anthropic 的 API Key，没有免费额度；要求更高时用 `claude-sonnet-5-5` |
+
+- 阿里云百炼的新人免费额度是每个模型 100 万 Token，只在华北 2（北京）地域，有效期 90 天，从开通百炼或模型上架的日期算起（取较晚者）。所以老账号只有近 90 天内上架的模型还有额度；剩余额度和到期时间在百炼控制台的“免费额度”页面看，那里还可以打开“免费额度用完即停”。
+- 百炼的新模型默认先“深度思考”再回答。本应用对百炼地址会关闭它（v1.7.1 及更早的版本不会，用这些模型时会更慢、更费 Token）。
+- Claude 需要比 v1.7.1 更新的版本：旧版本发送的 `temperature` 会被 Claude 的接口拒绝。Anthropic 说明它的 OpenAI 兼容接口主要用于测试和比较，不承诺作为长期的生产方案。
+
+来源：[百炼模型价格](https://help.aliyun.com/zh/model-studio/model-pricing)、[新人免费额度](https://help.aliyun.com/zh/model-studio/new-free-quota)、[模型上架与更新](https://help.aliyun.com/zh/model-studio/newly-released-models)、[深度思考](https://help.aliyun.com/zh/model-studio/deep-thinking)、[Claude 的 OpenAI SDK 兼容说明](https://platform.claude.com/docs/en/api/openai-sdk)。
 
 ### OCR 方案
 

@@ -1,3 +1,4 @@
+pub mod compat;
 mod openai_compatible;
 #[cfg(test)]
 mod stream_tests;

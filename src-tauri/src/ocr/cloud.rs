@@ -38,6 +38,17 @@ pub async fn recognize(
     api_key: &str,
     png: &[u8],
 ) -> Result<String, AppError> {
+    let extras = Extras::for_model(&settings.cloud_ocr_base_url, &settings.cloud_ocr_model);
+    recognize_with(client, settings, api_key, png, extras).await
+}
+
+async fn recognize_with(
+    client: &reqwest::Client,
+    settings: &AppSettings,
+    api_key: &str,
+    png: &[u8],
+    extras: Extras,
+) -> Result<String, AppError> {
     if api_key.trim().is_empty() {
         return Err(AppError::Ocr("请先在设置中填写云端视觉 OCR API Key".into()));
     }
@@ -48,27 +59,9 @@ pub async fn recognize(
         settings.cloud_ocr_base_url.trim_end_matches('/')
     );
     let data_url = format!("data:image/png;base64,{}", STANDARD.encode(png));
-    let mut body = json!({
-        "model": settings.cloud_ocr_model,
-        "messages": [{
-            "role": "user",
-            "content": [
-                {
-                    "type": "image_url",
-                    "image_url": { "url": data_url },
-                    "min_pixels": 3072,
-                    "max_pixels": 8388608
-                },
-                { "type": "text", "text": OCR_PROMPT }
-            ]
-        }]
-    });
-    // Reading text off a screenshot needs no deliberation; see `compat::dialect`.
-    let dialect = compat::dialect(&settings.cloud_ocr_base_url, &settings.cloud_ocr_model, 0.0);
-    if let Some(enabled) = dialect.enable_thinking {
-        body["enable_thinking"] = json!(enabled);
-    }
-    let mut asked_without_switch = false;
+    let mut body = request_body(&settings.cloud_ocr_model, &data_url, extras);
+    // Whether the request still carries what only this service takes.
+    let mut tuned = extras != Extras::default();
 
     let mut attempt = 0;
     loop {
@@ -105,15 +98,15 @@ pub async fn recognize(
         if status.as_u16() == 401 || status.as_u16() == 403 {
             return Err(AppError::InvalidApiKey);
         }
-        if status.as_u16() == 400 && body.get("enable_thinking").is_some() {
-            // The model refuses the switch; ask again the plain way.
-            if let Some(fields) = body.as_object_mut() {
-                fields.remove("enable_thinking");
-            }
-            asked_without_switch = true;
+        if status.as_u16() == 400 && tuned {
+            // The model may be refusing one of the extras rather than the request itself.
+            // Ask once more with nothing but the image and the instruction.
+            tuned = false;
+            body = request_body(&settings.cloud_ocr_model, &data_url, Extras::default());
             continue;
         }
-        if status.is_success() && asked_without_switch {
+        if status.is_success() && !tuned && extras.pixel_bounds.is_none() {
+            // The thinking switch was the only extra, so it is what was refused.
             compat::remember_thinking_switch_refused(
                 &settings.cloud_ocr_base_url,
                 &settings.cloud_ocr_model,
@@ -142,6 +135,44 @@ pub async fn recognize(
         }
         return Ok(text);
     }
+}
+
+/// What a request carries beyond the image and the instruction, because the service and
+/// model in use are known to take it. See `compat` for the reasons.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+struct Extras {
+    /// `Some(false)` to keep the model from deliberating before it reads the text.
+    enable_thinking: Option<bool>,
+    /// Lower and upper pixel bounds, for the dedicated text-extraction models only.
+    pixel_bounds: Option<(u32, u32)>,
+}
+
+impl Extras {
+    fn for_model(base_url: &str, model: &str) -> Self {
+        Self {
+            enable_thinking: compat::dialect(base_url, model, 0.0).enable_thinking,
+            pixel_bounds: compat::ocr_pixel_bounds(base_url, model),
+        }
+    }
+}
+
+fn request_body(model: &str, data_url: &str, extras: Extras) -> Value {
+    let mut image = json!({ "type": "image_url", "image_url": { "url": data_url } });
+    if let Some((min, max)) = extras.pixel_bounds {
+        image["min_pixels"] = json!(min);
+        image["max_pixels"] = json!(max);
+    }
+    let mut body = json!({
+        "model": model,
+        "messages": [{
+            "role": "user",
+            "content": [image, { "type": "text", "text": OCR_PROMPT }]
+        }]
+    });
+    if let Some(enabled) = extras.enable_thinking {
+        body["enable_thinking"] = json!(enabled);
+    }
+    body
 }
 
 /// The least a screenshot may be shrunk to. Below this, small text stops being legible
@@ -246,6 +277,180 @@ fn safe_error_excerpt(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const MODEL_STUDIO: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
+
+    fn body_for(base_url: &str, model: &str) -> Value {
+        request_body(
+            model,
+            "data:image/png;base64,AAAA",
+            Extras::for_model(base_url, model),
+        )
+    }
+
+    #[test]
+    fn pixel_bounds_go_only_to_the_models_they_were_written_for() {
+        // The dedicated text-extraction model takes the bounds from its documentation.
+        let ocr = body_for(MODEL_STUDIO, "qwen3.5-ocr");
+        let image = &ocr["messages"][0]["content"][0];
+        assert_eq!(image["min_pixels"], 3072);
+        assert_eq!(image["max_pixels"], 8_388_608);
+
+        // qwen4-max answered "min_pixels must be greater than or equal to 4096" to them.
+        for model in ["qwen4-max", "qwen3.8-flash"] {
+            let general = body_for(MODEL_STUDIO, model);
+            let image = &general["messages"][0]["content"][0];
+            assert!(image.get("min_pixels").is_none(), "{model}");
+            assert!(image.get("max_pixels").is_none(), "{model}");
+            assert_eq!(image["image_url"]["url"], "data:image/png;base64,AAAA");
+            assert_eq!(general["enable_thinking"], false, "{model}");
+        }
+    }
+
+    #[test]
+    fn other_services_get_the_image_and_the_instruction_and_nothing_else() {
+        for (base, model) in [
+            ("https://api.anthropic.com/v1", "claude-haiku-5-5"),
+            ("https://api.openai.com/v1", "gpt-4.1-mini"),
+        ] {
+            let body = body_for(base, model);
+            assert_eq!(
+                body,
+                request_body(model, "data:image/png;base64,AAAA", Extras::default())
+            );
+            assert!(body.get("enable_thinking").is_none());
+            let content = body["messages"][0]["content"].as_array().unwrap();
+            assert_eq!(content.len(), 2);
+            assert_eq!(
+                content[0],
+                json!({ "type": "image_url", "image_url": { "url": "data:image/png;base64,AAAA" } })
+            );
+            assert_eq!(content[1]["text"], OCR_PROMPT);
+        }
+    }
+
+    /// Answers one prepared reply per connection and returns the JSON bodies it was sent.
+    fn serve(
+        replies: Vec<(&'static str, &'static str)>,
+    ) -> (String, std::thread::JoinHandle<Vec<Value>>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = format!("http://{}/v1", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let mut bodies = Vec::new();
+            for (status, reply) in replies {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let mut buffer = [0u8; 8192];
+                let body_start = loop {
+                    let count = stream.read(&mut buffer).unwrap_or(0);
+                    if count == 0 {
+                        break None;
+                    }
+                    bytes.extend_from_slice(&buffer[..count]);
+                    let Some(end) = bytes.windows(4).position(|window| window == b"\r\n\r\n")
+                    else {
+                        continue;
+                    };
+                    let head = String::from_utf8_lossy(&bytes[..end]).to_ascii_lowercase();
+                    let length = head
+                        .lines()
+                        .find_map(|line| {
+                            line.strip_prefix("content-length:")?
+                                .trim()
+                                .parse::<usize>()
+                                .ok()
+                        })
+                        .unwrap_or(0);
+                    if bytes.len() >= end + 4 + length {
+                        break Some(end + 4);
+                    }
+                };
+                bodies.push(serde_json::from_slice(&bytes[body_start.unwrap()..]).unwrap());
+                let _ = stream.write_all(
+                    format!(
+                        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                        reply.len()
+                    )
+                    .as_bytes(),
+                );
+            }
+            bodies
+        });
+        (address, handle)
+    }
+
+    fn settings_for(address: String) -> AppSettings {
+        AppSettings {
+            cloud_ocr_base_url: address,
+            cloud_ocr_model: "test-vision".into(),
+            ..AppSettings::default()
+        }
+    }
+
+    const RECOGNISED: &str = r#"{"choices":[{"message":{"content":"QuickTranslate"}}]}"#;
+
+    #[tokio::test]
+    async fn a_refused_extra_is_dropped_and_the_image_sent_again_by_itself() {
+        // What qwen4-max answered to the bounds written for the text-extraction models.
+        let (address, server) = serve(vec![
+            (
+                "400 Bad Request",
+                r#"{"error":{"message":"Parameter min_pixels must be greater than or equal to 4096"}}"#,
+            ),
+            ("200 OK", RECOGNISED),
+        ]);
+        let extras = Extras {
+            enable_thinking: Some(false),
+            pixel_bounds: Some((3072, 8_388_608)),
+        };
+        let text = recognize_with(
+            &reqwest::Client::new(),
+            &settings_for(address),
+            "test-key",
+            CONNECTION_TEST_IMAGE,
+            extras,
+        )
+        .await
+        .unwrap();
+        assert_eq!(text, "QuickTranslate");
+
+        let bodies = server.join().unwrap();
+        assert_eq!(bodies.len(), 2);
+        assert_eq!(bodies[0]["messages"][0]["content"][0]["min_pixels"], 3072);
+        assert_eq!(bodies[0]["enable_thinking"], false);
+        let image = &bodies[1]["messages"][0]["content"][0];
+        assert!(image.get("min_pixels").is_none());
+        assert!(image.get("max_pixels").is_none());
+        assert!(bodies[1].get("enable_thinking").is_none());
+        // The picture itself is the same both times.
+        assert_eq!(
+            image["image_url"],
+            bodies[0]["messages"][0]["content"][0]["image_url"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_request_without_extras_is_not_sent_twice_when_it_is_refused() {
+        let (address, server) = serve(vec![(
+            "400 Bad Request",
+            r#"{"error":{"message":"model not found"}}"#,
+        )]);
+        let error = recognize_with(
+            &reqwest::Client::new(),
+            &settings_for(address),
+            "test-key",
+            CONNECTION_TEST_IMAGE,
+            Extras::default(),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(error, AppError::Ocr(message) if message.contains("model not found")));
+        assert_eq!(server.join().unwrap().len(), 1);
+    }
 
     #[test]
     fn reads_string_and_array_message_content() {

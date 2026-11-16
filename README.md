@@ -166,6 +166,7 @@ git switch main
 
 - 阿里云百炼的新人免费额度是每个模型 100 万 Token，只在华北 2（北京）地域，有效期 90 天，从开通百炼或模型上架的日期算起（取较晚者）。所以老账号只有近 90 天内上架的模型还有额度；剩余额度和到期时间在百炼控制台的“免费额度”页面看，那里还可以打开“免费额度用完即停”。
 - 百炼的新模型默认先“深度思考”再回答。本应用对百炼地址会关闭它（v1.7.1 及更早的版本不会，用这些模型时会更慢、更费 Token）。
+- 用通用视觉模型（`qwen3.8-flash`、`qwen4-max`、Claude）做 OCR 也需要比 v1.7.1 更新的版本：旧版本固定发送专用 OCR 模型的像素参数，`qwen4-max` 会以“min_pixels must be greater than or equal to 4096”拒绝。v1.7.1 及更早的版本做 OCR 请用 `qwen3.5-ocr`。
 - Claude 需要比 v1.7.1 更新的版本：旧版本发送的 `temperature` 会被 Claude 的接口拒绝。Anthropic 说明它的 OpenAI 兼容接口主要用于测试和比较，不承诺作为长期的生产方案。
 
 来源：[百炼模型价格](https://help.aliyun.com/zh/model-studio/model-pricing)、[新人免费额度](https://help.aliyun.com/zh/model-studio/new-free-quota)、[模型上架与更新](https://help.aliyun.com/zh/model-studio/newly-released-models)、[深度思考](https://help.aliyun.com/zh/model-studio/deep-thinking)、[Claude 的 OpenAI SDK 兼容说明](https://platform.claude.com/docs/en/api/openai-sdk)。

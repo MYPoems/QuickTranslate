@@ -57,6 +57,13 @@ pub mod providers {
         ) -> Result<TranslationResult, AppError>;
     }
 
+    pub mod compat {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../src-tauri/src/providers/compat.rs"
+        ));
+    }
+
     pub mod openai_compatible {
         include!(concat!(
             env!("CARGO_MANIFEST_DIR"),

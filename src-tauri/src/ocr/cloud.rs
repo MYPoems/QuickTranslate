@@ -4,7 +4,7 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use crate::{config::AppSettings, errors::AppError};
+use crate::{config::AppSettings, errors::AppError, providers::compat};
 
 const MAX_CLOUD_IMAGE_BYTES: usize = 7_000_000;
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
@@ -48,7 +48,7 @@ pub async fn recognize(
         settings.cloud_ocr_base_url.trim_end_matches('/')
     );
     let data_url = format!("data:image/png;base64,{}", STANDARD.encode(png));
-    let body = json!({
+    let mut body = json!({
         "model": settings.cloud_ocr_model,
         "messages": [{
             "role": "user",
@@ -63,6 +63,12 @@ pub async fn recognize(
             ]
         }]
     });
+    // Reading text off a screenshot needs no deliberation; see `compat::dialect`.
+    let dialect = compat::dialect(&settings.cloud_ocr_base_url, &settings.cloud_ocr_model, 0.0);
+    if let Some(enabled) = dialect.enable_thinking {
+        body["enable_thinking"] = json!(enabled);
+    }
+    let mut asked_without_switch = false;
 
     let mut attempt = 0;
     loop {
@@ -98,6 +104,20 @@ pub async fn recognize(
         }
         if status.as_u16() == 401 || status.as_u16() == 403 {
             return Err(AppError::InvalidApiKey);
+        }
+        if status.as_u16() == 400 && body.get("enable_thinking").is_some() {
+            // The model refuses the switch; ask again the plain way.
+            if let Some(fields) = body.as_object_mut() {
+                fields.remove("enable_thinking");
+            }
+            asked_without_switch = true;
+            continue;
+        }
+        if status.is_success() && asked_without_switch {
+            compat::remember_thinking_switch_refused(
+                &settings.cloud_ocr_base_url,
+                &settings.cloud_ocr_model,
+            );
         }
         if !status.is_success() {
             let message = response.text().await.unwrap_or_default();

@@ -39,8 +39,9 @@ const providerPresets: Record<string, { baseUrl: string; model: string }> = {
   "OpenAI Compatible": { baseUrl: "https://api.openai.com/v1", model: "gpt-4.1-mini" },
   "阿里云百炼": {
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    model: "qwen-turbo",
+    model: "qwen3.8-flash",
   },
+  "Anthropic Claude": { baseUrl: "https://api.anthropic.com/v1", model: "claude-haiku-5-5" },
   DeepSeek: { baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" },
   Ollama: { baseUrl: "http://localhost:11434/v1", model: "qwen2.5:3b" },
   "LM Studio": { baseUrl: "http://localhost:1234/v1", model: "local-model" },
@@ -59,6 +60,7 @@ export function mountSettings(): void {
           <select name="provider">
             <option>OpenAI Compatible</option>
             <option>阿里云百炼</option>
+            <option>Anthropic Claude</option>
             <option>DeepSeek</option>
             <option>Ollama</option>
             <option>LM Studio</option>

@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use super::{OpenAiCompatibleProvider, ProviderConfig};
+use super::{compat::Dialect, OpenAiCompatibleProvider, ProviderConfig, Translator};
 use crate::{
     errors::AppError,
     translation::types::{Language, TranslationRequest},
@@ -216,4 +216,76 @@ async fn a_single_word_is_looked_up_whole() {
         .unwrap();
     assert_eq!(result.translation, "架构");
     assert!(!server.join().unwrap()[0].contains("\"stream\""));
+}
+
+/// The body of a recorded request.
+fn body(request: &str) -> serde_json::Value {
+    let start = request.find("\r\n\r\n").map_or(0, |index| index + 4);
+    serde_json::from_str(&request[start..]).unwrap()
+}
+
+#[tokio::test]
+async fn a_model_that_refuses_the_thinking_switch_is_asked_again_without_it() {
+    let (address, server) = serve(vec![
+        json_reply(
+            "400 Bad Request",
+            r#"{"error":{"message":"enable_thinking is not supported"}}"#,
+        ),
+        json_reply("200 OK", WHOLE_REPLY),
+    ]);
+    let result = provider(address)
+        .with_dialect(Dialect {
+            temperature: Some(0.1),
+            enable_thinking: Some(false),
+        })
+        .translate(sentence())
+        .await
+        .unwrap();
+    assert_eq!(result.translation, "保持好奇，持续学习。");
+
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(body(&requests[0])["enable_thinking"], false);
+    assert!(body(&requests[1]).get("enable_thinking").is_none());
+    // Everything else is asked the same way the second time.
+    assert_eq!(
+        body(&requests[0])["messages"],
+        body(&requests[1])["messages"]
+    );
+}
+
+#[tokio::test]
+async fn a_refusal_for_another_reason_is_not_retried_forever() {
+    let (address, server) = serve(vec![
+        json_reply("400 Bad Request", r#"{"error":{"message":"bad model"}}"#),
+        json_reply("400 Bad Request", r#"{"error":{"message":"bad model"}}"#),
+    ]);
+    let error = provider(address)
+        .with_dialect(Dialect {
+            temperature: Some(0.1),
+            enable_thinking: Some(false),
+        })
+        .translate(sentence())
+        .await
+        .unwrap_err();
+    assert!(matches!(error, AppError::Provider(_)));
+    assert_eq!(server.join().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn a_service_that_rejects_the_temperature_is_not_sent_one() {
+    let (address, server) = serve(vec![json_reply("200 OK", WHOLE_REPLY)]);
+    provider(address)
+        .with_dialect(Dialect {
+            temperature: None,
+            enable_thinking: None,
+        })
+        .translate(sentence())
+        .await
+        .unwrap();
+    let requests = server.join().unwrap();
+    let sent = body(&requests[0]);
+    assert!(sent.get("temperature").is_none());
+    assert!(sent.get("enable_thinking").is_none());
+    assert_eq!(sent["model"], "test-model");
 }

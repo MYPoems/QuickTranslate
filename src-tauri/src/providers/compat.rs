@@ -24,18 +24,40 @@ pub struct Dialect {
 ///   switch is sent with `false`; a model that refuses the switch is remembered and asked
 ///   without it from then on (see [`remember_thinking_switch_refused`]).
 pub fn dialect(base_url: &str, model: &str, temperature: f32) -> Dialect {
-    let host = reqwest::Url::parse(base_url.trim())
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
-        .unwrap_or_default();
+    let host = host(base_url);
     let model = model.trim().to_ascii_lowercase();
     let claude = host == "api.anthropic.com" || model.contains("claude");
-    let model_studio = host.ends_with(".aliyuncs.com")
-        && (host.starts_with("dashscope") || host.contains(".maas."));
     Dialect {
         temperature: (!claude).then_some(temperature),
-        enable_thinking: (model_studio && !thinking_switch_refused(&host, &model)).then_some(false),
+        enable_thinking: (is_model_studio(&host) && !thinking_switch_refused(&host, &model))
+            .then_some(false),
     }
+}
+
+/// The pixel bounds that Model Studio's dedicated text-extraction models take with an image:
+/// a smaller image is enlarged to the lower bound and a larger one reduced to the upper.
+/// The values are the ones in their documentation.
+///
+/// Nobody else is sent them. General vision models on the same service have other limits
+/// (qwen4-max answers HTTP 400 to a lower bound under 4096) and other services do not
+/// know the fields; they get the image alone and apply their own defaults.
+pub fn ocr_pixel_bounds(base_url: &str, model: &str) -> Option<(u32, u32)> {
+    let model = model.trim().to_ascii_lowercase();
+    // A model may be named with a vendor prefix, as in "vendor/model".
+    let name = model.rsplit('/').next().unwrap_or(&model);
+    (is_model_studio(&host(base_url)) && name.starts_with("qwen") && name.contains("ocr"))
+        .then_some((3072, 8_388_608))
+}
+
+fn host(base_url: &str) -> String {
+    reqwest::Url::parse(base_url.trim())
+        .ok()
+        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
+        .unwrap_or_default()
+}
+
+fn is_model_studio(host: &str) -> bool {
+    host.ends_with(".aliyuncs.com") && (host.starts_with("dashscope") || host.contains(".maas."))
 }
 
 fn refused() -> &'static Mutex<HashSet<String>> {
@@ -57,10 +79,7 @@ fn thinking_switch_refused(host: &str, model: &str) -> bool {
 /// accepted the same request without it, so later requests do not waste a round trip.
 /// Kept for the life of the process only.
 pub fn remember_thinking_switch_refused(base_url: &str, model: &str) {
-    let host = reqwest::Url::parse(base_url.trim())
-        .ok()
-        .and_then(|url| url.host_str().map(str::to_ascii_lowercase))
-        .unwrap_or_default();
+    let host = host(base_url);
     if let Ok(mut set) = refused().lock() {
         set.insert(refusal_key(&host, &model.trim().to_ascii_lowercase()));
     }
@@ -134,6 +153,39 @@ mod tests {
             .enable_thinking,
             None
         );
+    }
+
+    #[test]
+    fn only_the_dedicated_text_extraction_models_get_pixel_bounds() {
+        for model in [
+            "qwen3.5-ocr",
+            "qwen-vl-ocr",
+            "Qwen-VL-OCR-latest",
+            " qwen3.5-ocr ",
+        ] {
+            assert_eq!(
+                ocr_pixel_bounds(MODEL_STUDIO, model),
+                Some((3072, 8_388_608)),
+                "{model}"
+            );
+        }
+        // General vision models have other limits: qwen4-max refuses 3072.
+        for model in [
+            "qwen4-max",
+            "qwen3.8-flash",
+            "vanchin/deepseek-ocr",
+            "deepseek-v4.1-flash",
+        ] {
+            assert_eq!(ocr_pixel_bounds(MODEL_STUDIO, model), None, "{model}");
+        }
+        // Other services do not know the fields at all.
+        for (base, model) in [
+            ("https://api.anthropic.com/v1", "claude-haiku-5-5"),
+            ("https://api.openai.com/v1", "gpt-4.1-mini"),
+            ("https://gateway.example/v1", "qwen3.5-ocr"),
+        ] {
+            assert_eq!(ocr_pixel_bounds(base, model), None, "{base} {model}");
+        }
     }
 
     #[test]

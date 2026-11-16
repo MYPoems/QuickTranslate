@@ -25,8 +25,9 @@ pub fn set_vocabulary_collection_open(
 fn changed(app: &AppHandle) {
     let _ = app.emit("vocabulary-changed", ());
 }
+/// Asynchronous for the same reason as `open_settings`: it may have to create the window.
 #[tauri::command]
-pub fn open_vocabulary(app: AppHandle) {
+pub async fn open_vocabulary(app: AppHandle) {
     crate::window::show_vocabulary(&app);
 }
 #[tauri::command]

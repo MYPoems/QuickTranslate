@@ -29,7 +29,7 @@
 | 设置、凭据、升级 | `src/settings/`、`src-tauri/src/config/`、`security/secret_store.rs`、`commands/{settings,update}.rs`、`update.rs`、`upgrade.rs` |
 | 测试与发布 | `tests/`、各 Rust 模块的测试、`core-tests/`、`tools/selection-harness/`（取词原生回归，手动运行）、`scripts/`、`.github/workflows/`、`docs/` |
 
-路径表中省略的后端路径均相对于 `src-tauri/src/`。增改 IPC 时同时检查 Rust 序列化、TS 类型、调用方和窗口权限：新命令要同时加进 `lib.rs` 的 handler、`build.rs` 的 `COMMANDS` 和调用它的窗口的 capability 文件，否则 `tests/ipc.test.ts` 失败，运行时该窗口的调用也会被拒绝。敏感操作、持久状态和校验留在 Rust，不信任前端提供的状态或时间。
+路径表中省略的后端路径均相对于 `src-tauri/src/`。**会新建窗口的命令必须是异步命令**（`pub async fn`）：同步命令在调用它的 WebView 的回调里执行，在那里新建的窗口在 Windows 上得不到自己的 WebView，表现为一个空白窗口。`open_settings`、`open_vocabulary`、`start_ocr_selection` 在 v1.7.2 之前都是同步的；`tests/ipc.test.ts` 现在会检查调用了建窗函数的命令是否为异步。托盘菜单和全局快捷键的处理函数不在 WebView 回调里，不受影响。增改 IPC 时同时检查 Rust 序列化、TS 类型、调用方和窗口权限：新命令要同时加进 `lib.rs` 的 handler、`build.rs` 的 `COMMANDS` 和调用它的窗口的 capability 文件，否则 `tests/ipc.test.ts` 失败，运行时该窗口的调用也会被拒绝。敏感操作、持久状态和校验留在 Rust，不信任前端提供的状态或时间。
 
 ## 3. 当前功能与不得破坏的约束
 
@@ -40,7 +40,7 @@
 - 语言：`translation/language.rs` 按文字系统和常用词判断中、英、日、韩、法、德、西、俄，短文本可能判错；`TranslationPreferences`（设置里的可选块，Schema 仍为 5）保存“我阅读的语言”、另一种语言、术语表（最多 200 条）和附加要求（最多 600 字）。只把出现在原文里的术语发给模型。悬浮窗菜单可为当前文本临时指定目标语言。没有对应音色的语言不显示朗读。API、取词、翻译空结果应分别诊断。新请求取消旧请求，`request_id` 防止旧结果覆盖新界面；取消异步等待不等于中止已开始的阻塞系统调用。
 - 缓存失败不应阻断翻译展示，翻译缓存最多 1000 条；支持重译绕过缓存。历史是独立的表 `translation_history`（最近 5000 条，收藏不计入也不被清理），可搜索、收藏、复制、删除和清空（破坏性操作需确认，清空默认保留收藏）；清理缓存不动历史。从历史打开旧译文只读本地结果，不重新调用模型。旧库首次打开时自动拆分。
 - 默认翻译配置是 `https://api.openai.com/v1` + `gpt-4.1-mini`，不是已配置凭据。设置提供 OpenAI、阿里云百炼、DeepSeek、自定义及 Ollama / LM Studio 预设。Base URL 填 API 根路径，不追加完整 `/chat/completions`；实际模型权限和额度由服务商决定。设置里的预设只是填表的便利：阿里云百炼填 `qwen3.8-flash`，Anthropic Claude 填 `https://api.anthropic.com/v1` + `claude-haiku-5-5`；模型会过时，换预设时查服务商的现行列表，README 的“选哪个模型”一节记着查阅日期和来源。远程使用 HTTPS，普通 HTTP 仅允许本机回环。回环模型可以无 Key；不要把某个用户私有配置写成项目默认。
-- Provider 对 429、5xx、连接/超时错误有限重试，401 不应当作网络重试。遇到 429 先区分调用频率、账户额度和计费限制，不要一味增加重试。单个英文词会走结构化词义提示，和持久生词本的词卡生成是两条路径。翻译缓存键含文本、语言方向、Provider 名、Model、服务地址以及术语表和附加要求的摘要；改其中任何一项都不会命中旧译文。
+- Provider 对 429、5xx、连接/超时错误有限重试，401 不应当作网络重试。403 不等于 Key 无效：百炼在免费额度用完且开启“用完即停”时返回 403（`AllocationQuota.FreeTierOnly`），`compat::forbidden_message` 把这种情况直接说明，其他 403 显示服务端的原话并去掉 Key。遇到 429 先区分调用频率、账户额度和计费限制，不要一味增加重试。单个英文词会走结构化词义提示，和持久生词本的词卡生成是两条路径。翻译缓存键含文本、语言方向、Provider 名、Model、服务地址以及术语表和附加要求的摘要；改其中任何一项都不会命中旧译文。
 - 同是 OpenAI 兼容接口，各家对请求字段的要求不同，规则集中在 `providers/compat.rs`，翻译、云端 OCR、词卡生成三条请求路径都从这里取，不要在各处另写判断：Claude（地址是 `api.anthropic.com` 或模型名含 `claude`）不发 `temperature`，因为 4.7 起的模型对低于 1 的值返回 400；阿里云百炼（`dashscope*.aliyuncs.com`、`*.maas.aliyuncs.com`）发 `enable_thinking: false`，因为它的新模型默认先思考。模型用 400 拒绝这个开关时去掉它重试一次，成功就在进程内记住。云端 OCR 的 `min_pixels` / `max_pixels` 只发给百炼的专用文字提取模型（名字以 `qwen` 开头且含 `ocr`），这些模型不发 `enable_thinking`，请求与 v1.7.1 发的完全一样；因为通用视觉模型的下限不同：v1.7.1 对所有模型都发 3072，`qwen4-max` 以“min_pixels must be greater than or equal to 4096”拒绝，这是用户在安装版上实际遇到的。云端 OCR 带了任何附加项的请求被 400 拒绝时，去掉全部附加项只带图片重试一次。除了这一条报错来自真实服务，这些规则只有单元测试和回环服务测试，没有对真实的百炼或 Anthropic 接口验证过；给某个服务加字段之前先查它的文档，推荐模型之前先实测。
 
 ### OCR：云端优先，离线为显式替代

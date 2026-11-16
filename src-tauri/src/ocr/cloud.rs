@@ -95,8 +95,13 @@ async fn recognize_with(
             tokio::time::sleep(Duration::from_millis(650)).await;
             continue;
         }
-        if status.as_u16() == 401 || status.as_u16() == 403 {
+        if status.as_u16() == 401 {
             return Err(AppError::InvalidApiKey);
+        }
+        if status.as_u16() == 403 {
+            // Not necessarily the key; see `compat::forbidden_message`.
+            let message = response.text().await.unwrap_or_default();
+            return Err(AppError::Ocr(compat::forbidden_message(&message, api_key)));
         }
         if status.as_u16() == 400 && tuned {
             // The model may be refusing one of the extras rather than the request itself.

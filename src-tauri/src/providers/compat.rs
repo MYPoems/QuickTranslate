@@ -49,6 +49,41 @@ pub fn ocr_pixel_bounds(base_url: &str, model: &str) -> Option<(u32, u32)> {
         .then_some((3072, 8_388_608))
 }
 
+/// What to tell the user when a service answers HTTP 403.
+///
+/// A 403 is not always a bad key. Model Studio answers it when a model's free quota is used
+/// up and the account stops at the free tier; reported as "invalid API key" that sent the
+/// user looking in the wrong place. That case is named outright. Anything else is shown in
+/// the service's own words, shortened, and with the key removed should a service echo it.
+pub fn forbidden_message(body: &str, api_key: &str) -> String {
+    if body.contains("FreeTierOnly") {
+        return "这个模型的免费额度已用完，而阿里云百炼开启了“免费额度用完即停”，所以请求被拒绝。请换一个仍有额度的模型，或在百炼控制台关闭该模型的“用完即停”后按量付费。".into();
+    }
+    let said = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value["error"]["message"]
+                .as_str()
+                .or_else(|| value["message"].as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| body.to_string());
+    let mut said = said.split_whitespace().collect::<Vec<_>>().join(" ");
+    if !api_key.trim().is_empty() {
+        said = said.replace(api_key.trim(), "***");
+    }
+    if said.is_empty() {
+        return "服务拒绝了这次请求（HTTP 403）。请检查 API Key 是否有权使用这个模型。".into();
+    }
+    let excerpt: String = said.chars().take(160).collect();
+    let ellipsis = if said.chars().count() > 160 {
+        "…"
+    } else {
+        ""
+    };
+    format!("服务拒绝了这次请求（HTTP 403）：{excerpt}{ellipsis}")
+}
+
 fn host(base_url: &str) -> String {
     reqwest::Url::parse(base_url.trim())
         .ok()
@@ -153,6 +188,36 @@ mod tests {
             .enable_thinking,
             None
         );
+    }
+
+    #[test]
+    fn a_used_up_free_quota_is_not_reported_as_a_bad_key() {
+        let body = r#"{"error":{"message":"The free tier of the model has been exhausted.","type":"AllocationQuota.FreeTierOnly","code":"AllocationQuota.FreeTierOnly"}}"#;
+        let message = forbidden_message(body, "sk-test");
+        assert!(message.contains("免费额度已用完"), "{message}");
+        assert!(message.contains("用完即停"), "{message}");
+    }
+
+    #[test]
+    fn other_refusals_are_shown_in_the_services_words_without_the_key() {
+        let message = forbidden_message(
+            r#"{"error":{"message":"Access to model denied for key sk-secret-123.\n Contact support."}}"#,
+            "sk-secret-123",
+        );
+        assert!(message.contains("HTTP 403"), "{message}");
+        assert!(
+            message.contains("Access to model denied for key ***. Contact support."),
+            "{message}"
+        );
+        assert!(!message.contains("sk-secret-123"));
+
+        // Not JSON: the text itself, cut between characters.
+        let long = "拒绝访问。".repeat(60);
+        let message = forbidden_message(&long, "");
+        assert!(message.ends_with('…'), "{message}");
+        assert!(message.chars().count() < 200);
+
+        assert!(forbidden_message("", "sk-test").contains("是否有权使用这个模型"));
     }
 
     #[test]

@@ -135,8 +135,16 @@ impl Translator for OpenAiCompatibleProvider {
         }
 
         let status = response.status();
-        if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        if status == StatusCode::UNAUTHORIZED {
             return Err(AppError::InvalidApiKey);
+        }
+        if status == StatusCode::FORBIDDEN {
+            // Not necessarily the key; see `compat::forbidden_message`.
+            let body = response.text().await.unwrap_or_default();
+            return Err(AppError::Provider(compat::forbidden_message(
+                &body,
+                &self.config.api_key,
+            )));
         }
         if status == StatusCode::TOO_MANY_REQUESTS {
             return Err(AppError::Provider("请求过于频繁，请稍后重试".into()));

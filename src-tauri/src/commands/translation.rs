@@ -74,8 +74,12 @@ pub fn cancel_request(app: AppHandle) -> u64 {
 }
 
 /// Opens the settings window, for the popup's "configure" prompts.
+///
+/// Asynchronous on purpose: a synchronous command runs inside the calling WebView's
+/// callback, and a window created from there gets no WebView of its own on Windows: it
+/// came up blank.
 #[tauri::command]
-pub fn open_settings(app: AppHandle) {
+pub async fn open_settings(app: AppHandle) {
     crate::window::show_settings(&app);
 }
 

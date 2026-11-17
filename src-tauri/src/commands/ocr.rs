@@ -278,8 +278,11 @@ pub fn uninstall_paddle_ocr_plugin(
 }
 
 /// Opens the screenshot overlay again, for the popup's "select again".
+///
+/// Asynchronous for the same reason as `open_settings`: the overlay window does not exist
+/// until it is first needed.
 #[tauri::command]
-pub fn start_ocr_selection(app: AppHandle) {
+pub async fn start_ocr_selection(app: AppHandle) {
     if app
         .get_webview_window("ocr")
         .is_some_and(|window| window.is_visible().unwrap_or(false))

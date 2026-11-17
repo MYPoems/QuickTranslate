@@ -75,3 +75,23 @@ test("windows do not inherit commands from a shared capability", async () => {
     assert.equal(popup.includes(sensitive), false, `the popup cannot call ${sensitive}`);
   }
 });
+
+// A window created from a synchronous command gets no WebView on Windows: the command runs
+// inside the calling WebView's callback, and the new one cannot be set up from there. The
+// window comes up blank. Commands that can end up
+// creating a window therefore have to be asynchronous.
+test("commands that may create a window are asynchronous", async () => {
+  const windowModule = await readFile("src-tauri/src/window/mod.rs", "utf8");
+  const creators = [...windowModule.matchAll(/pub fn (\w+)\([^)]*\)[^{]*\{([\s\S]*?)\n\}/g)]
+    .filter(match => match[2].includes("WebviewWindowBuilder::new"))
+    .map(match => match[1]);
+  assert.ok(creators.includes("show_settings") && creators.includes("toggle_ocr_overlay"), `found ${creators}`);
+
+  for (const file of ["translation", "vocabulary", "ocr", "settings", "speech", "update"]) {
+    const source = await readFile(`src-tauri/src/commands/${file}.rs`, "utf8");
+    for (const match of source.matchAll(/#\[tauri::command\]\s*pub (async )?fn (\w+)\([\s\S]*?\n\}/g)) {
+      const calls = creators.filter(name => match[0].includes(`window::${name}(`));
+      if (calls.length) assert.ok(match[1], `${file}.rs: ${match[2]} calls ${calls} and must be async`);
+    }
+  }
+});

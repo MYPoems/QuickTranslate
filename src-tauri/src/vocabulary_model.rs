@@ -100,8 +100,15 @@ pub async fn generate(
             );
         }
     }
-    if matches!(response.status().as_u16(), 401 | 403) {
+    if response.status().as_u16() == 401 {
         return Err(AppError::InvalidApiKey);
+    }
+    if response.status().as_u16() == 403 {
+        // Not necessarily the key; see `compat::forbidden_message`.
+        let body = response.text().await.unwrap_or_default();
+        return Err(AppError::Vocabulary(
+            crate::providers::compat::forbidden_message(&body, key),
+        ));
     }
     if response.status().as_u16() == 429 {
         return Err(AppError::Vocabulary("词卡生成限流，请稍后手动重试".into()));

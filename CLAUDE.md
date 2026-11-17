@@ -135,7 +135,7 @@ try {
 
 ## 7. 本机替换、回滚、正式发布
 
-**v1.7.2 的发布物**：`QuickTranslate_1.7.2_x64-setup.exe`，19,679,070 字节，SHA-256 `1B430850A551DD4CE3597EDAD5F3A3C39CCC6C7E46C53B44C545CBDB13E75739`。Release 同时含 `.exe.sig`、`SHA256SUMS.txt`、`latest.json`。这些是该版固定值，不得用于核对未来新构建。这个包发布前已在本机安装并用真实服务验收。发布后是否已匿名重下复核，以 Release 页面和会话记录为准，本文写于发布之前。
+**v1.7.2 的发布物**：`QuickTranslate_1.7.2_x64-setup.exe`，19,679,070 字节，SHA-256 `1B430850A551DD4CE3597EDAD5F3A3C39CCC6C7E46C53B44C545CBDB13E75739`。Release 同时含 `.exe.sig`、`SHA256SUMS.txt`、`latest.json`。这些是该版固定值，不得用于核对未来新构建。这个包发布前已在本机安装并用真实服务验收。发布后已匿名重下四项并核对：哈希与 `SHA256SUMS.txt` 一致，并且就是本机验收过的那个包；`latest.json` 的版本、下载地址和签名与该包一致，`/releases/latest/download/latest.json` 指向 1.7.2；对下载回来的包跑 `verify_release_artifact` 通过；`main` 上的发布说明、Release 页面和 `latest.json` 里的说明三处文字一致。main CI [43985681343](https://github.com/MYPoems/QuickTranslate/actions/runs/43985681343)、标签构建 [43985696086](https://github.com/MYPoems/QuickTranslate/actions/runs/43985696086) 通过。
 
 **v1.7.1 的发布物**：`QuickTranslate_1.7.1_x64-setup.exe`，19,653,440 字节，SHA-256 `4349F065596580676F24612B6CC843D7A4E2FB37C6A7DE6DB377298BA8BBC86D`。Release 同时含 `.exe.sig`、`SHA256SUMS.txt`、`latest.json`。这些是该版固定值，不得用于核对未来新构建。发布后已匿名重下四项并核对：哈希与 `SHA256SUMS.txt` 一致，`latest.json` 的版本、下载地址和签名与该包一致，`/releases/latest/download/latest.json` 指向 1.7.1，对下载回来的包跑 `verify_release_artifact` 通过。main CI [43486378860](https://github.com/MYPoems/QuickTranslate/actions/runs/43486378860)、标签构建 [43486437607](https://github.com/MYPoems/QuickTranslate/actions/runs/43486437607) 通过。
 
